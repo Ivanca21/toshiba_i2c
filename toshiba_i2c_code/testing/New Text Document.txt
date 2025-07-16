@@ -1,0 +1,360 @@
+/**
+ * @file main.c
+ * @brief  I²C master (bare-metal) za EEPROM Click ? TMPM4KNF10AFG
+ *
+ *  HW veza:
+ *    PD3 ? I²C1-SCL   (mikroBUS-1 SCL)
+ *    PD4 ? I²C1-SDA   (mikroBUS-1 SDA)
+ *
+ *  Dok:  TXZ-I2C-B rev-2.3, TXZP-PORT-M4K(2), TXZP-CG-M4K(2)
+ */
+
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+#include "mcu.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+/* ================================================================
+ *  BIT MASKS
+ * ================================================================ */
+#define BIT3                        (1U << 3)      /* PD3 ? SCL */
+#define BIT4                        (1U << 4)      /* PD4 ? SDA */
+
+/* ====  CR1  ==== */
+#define TSB_I2C1_CR1_BC_pos         5
+#define TSB_I2C1_CR1_BC_MASK        (0x07U << TSB_I2C1_CR1_BC_pos)
+#define TSB_I2C1_CR1_ACK_pos        4
+#define TSB_I2C1_CR1_ACK_mask       (0x01U << TSB_I2C1_CR1_ACK_pos)
+
+/* ====  CR2  ==== */
+#define TSB_I2C1_CR2_MST_pos        7
+#define TSB_I2C1_CR2_MST_mask       (0x01U << TSB_I2C1_CR2_MST_pos)
+#define TSB_I2C1_CR2_TRX_pos        6
+#define TSB_I2C1_CR2_TRX_mask       (0x01U << TSB_I2C1_CR2_TRX_pos)
+#define TSB_I2C1_CR2_BB_pos         5
+#define TSB_I2C1_CR2_BB_mask        (0x01U << TSB_I2C1_CR2_BB_pos)
+#define TSB_I2C1_CR2_PIN_pos        4
+#define TSB_I2C1_CR2_PIN_mask       (0x01U << TSB_I2C1_CR2_PIN_pos)
+#define TSB_I2C1_CR2_I2CM_pos       3
+#define TSB_I2C1_CR2_I2CM_mask      (0x01U << TSB_I2C1_CR2_I2CM_pos)
+
+/* ====  SR  ==== */
+#define TSB_I2C1_SR_BB_pos          5
+#define TSB_I2C1_SR_BB_mask         (0x01U << TSB_I2C1_SR_BB_pos)
+#define TSB_I2C1_SR_PIN_pos         4
+#define TSB_I2C1_SR_PIN_mask        (0x01U << TSB_I2C1_SR_PIN_pos)
+#define TSB_I2C1_SR_LRB_mask        0x01U          /* bit-0 */
+
+/* ====  OP  ====  */
+#define TSB_I2C1_OP_SREN_pos        1
+#define TSB_I2C1_OP_SREN_mask       (0x01U << TSB_I2C1_OP_SREN_pos)
+#define TSB_I2C1_OP_MFACK_pos       0
+#define TSB_I2C1_OP_MFACK_mask      (0x01U << TSB_I2C1_OP_MFACK_pos)
+
+/* ====  PRS / CR1.SCK  ==== */
+#define I2C_PRS_PRSCK_pos           0
+#define I2C_PRS_PRSCK_mask          (0x1FU << I2C_PRS_PRSCK_pos)
+#define I2C_CR1_SCK_pos             0
+#define I2C_CR1_SCK_mask            (0x07U << I2C_CR1_SCK_pos)
+
+/* ================================================================
+ *  constants
+ * ================================================================ */
+#define EEPROM_ADDR                 0x50U     /* 24xx EEPROM, 7-bit addr */
+#define I2C_WRITE                   0x00U
+#define I2C_READ                    0x01U
+
+
+/* global variable for testing results */
+volatile uint8_t i2c_result_flag = 0;   /* 0 = fail, 1 = OK */
+
+
+#define START_CONDITION_MASK        0xF8   /* MST,TRX,BB,PIN = 1 + I2CM = 1*/
+#define STOP_CONDITION_MASK         0xD8   /* MST,TRX,PIN = 1, BB = 0 + I2CM = 1 */
+#define TSB_I2C1_I2CM_SET_MASK      0X08
+#define TSB_I2C1_CR2_MASTER_TRANSMITTER  0xC8
+
+#define ARRAY_LENGTH 150
+static uint8_t i;
+
+static uint8_t write_buffer[8];
+static uint8_t read_buffer[8];
+
+/* ================================================================
+ *  Function declarations
+ * ================================================================ */
+
+static inline void i2c_wait_transmit_end(void);
+
+static inline void i2c_wait_bus_free(void);
+
+static inline void i2c_start_condition(void);
+
+static inline void i2c_repeated_start(uint8_t addr_read);
+
+static inline void i2c_stop_condition(void);
+
+static void i2c_master_init(void);
+
+static bool eeprom_write_byte(uint8_t reg_addr, uint8_t data);
+
+static bool eeprom_read_byte(uint8_t reg_addr, uint8_t *pdata);
+
+void EEPROM_24C02_WrSingle(uint8_t wAddr, uint8_t wData);
+
+uint8_t EEPROM_24CO2_RdSingle(uint8_t rAddr);
+
+/* ================================================================
+ *  Main program
+ * ================================================================ */
+int main(void)
+{
+#ifdef PREINIT_SUPPORTED
+    preinit();
+#endif
+
+    // uint8_t read_back = 0;
+
+    // i2c_master_init();
+
+    // bool ok_w = eeprom_write_byte(0x00U, 0xABU);
+
+    // // /* kratka ACK-poll pauza (~5 ms) */
+    // // for (volatile uint32_t i = 0; i < 1000000UL; ++i) { __asm__("nop"); }
+
+    // bool ok_r = eeprom_read_byte(0x00U, &read_back);
+
+    //  if (ok_w && ok_r && (read_back == 0xABU)) {
+    //     i2c_result_flag = 1;            
+    // }
+
+
+
+    i2c_master_init();
+
+     for(i = 0; i < ARRAY_LENGTH; i++) {
+        EEPROM_24C02_WrSingle(i,i);
+        write_buffer[i] = i;
+       // for (volatile uint32_t i = 0; i < 1000000UL; ++i) { __asm__("nop"); }
+    }
+
+    int x = 0;
+
+    for (i = 0; i < ARRAY_LENGTH; i++) {
+    read_buffer[i] = EEPROM_24CO2_RdSingle(i);
+    //for (volatile uint32_t i = 0; i < 1000000UL; ++i) { __asm__("nop"); }  
+    }
+
+
+
+    while (1) { }
+
+    return 0;
+}
+
+/* ================================================================
+ *  Function definitions
+ * ================================================================ */
+
+/*====================================== i2c_wait_transmit_end ======================================*/
+
+/*
+At the end of a data word transfer, on the falling edge of 9th clock(ACK clock)
+INTI2Cx is generted which clears SR_PIN
+SR_PIN = 0 -> (SCL is pulled LOW) - page 29,43
+*/
+static inline void i2c_wait_transmit_end(void)
+{
+    while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask) {/* busy wait */ }
+}
+
+/*====================================== i2c_wait_bus_free ======================================*/
+
+/* 
+wait for buss to be free by checking SR_BB flag, SCL = 1 & SDA = 1
+*/
+static inline void i2c_wait_bus_free(void)
+{
+    while (TSB_I2C1->SR & TSB_I2C1_SR_BB_mask) {/* busy wait */ }
+}
+
+/*====================================== i2c_start_condition ======================================*/
+
+ /*
+  setting MST | TRX | BB | PIN = 1 generates START condition - page 22
+  ACK must be set to 1 before generating START condition 
+*/
+static inline void i2c_start_condition(void)
+{ 
+    TSB_I2C1->CR2 = START_CONDITION_MASK;
+}
+
+/*====================================== i2c_repeated_start ======================================*/
+
+/* 
+ SREN = 1 -> repeated start request, must be set to 1 while bus is busy(BB = 1) - page 50
+ writing slave_addr + R to DBR will automatically set device as a RECIEVER once the ACK is recieved - page 21
+*/
+static inline void i2c_repeated_start(uint8_t slave_addr)
+{
+    TSB_I2C1->OP  |= TSB_I2C1_OP_SREN_mask;                  
+                                                          
+    TSB_I2C1->DBR  = (slave_addr << 1) | I2C_READ;                          
+
+    TSB_I2C1->CR2 = START_CONDITION_MASK;
+}
+
+/*====================================== i2c_stop_condition ======================================*/
+
+/*
+ setting MST | TRX | PIN = 1 & BB = 0 generates STOP condition - page 22
+*/
+static inline void i2c_stop_condition(void)
+{
+    TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+}
+
+/*====================================== i2c_master_init ======================================*/
+
+static void i2c_master_init(void)
+{
+    /* Clock-gating: PORT-D + I²C1 */
+    TSB_CG_FSYSMENA_IPMENA03 = 1;
+    TSB_CG_FSYSMENA_IPMENA26 = 1;
+
+    /* configure PD3 and PD4 as SCL and SDA pins, the order of register configuration is importnat */
+    TSB_PD -> IE  |= BIT3 | BIT4;
+    TSB_PD -> OD  |= BIT3 | BIT4;
+    TSB_PD -> CR  |= BIT3 | BIT4;
+    TSB_PD -> FR2 |= BIT3 | BIT4;
+
+
+    /* ensure SDA and SCL pins are high (buss is free) */
+    TSB_PD -> DATA |= BIT3 | BIT4;
+
+    /* I²C bus enable */
+    TSB_I2C1->CR2 = TSB_I2C1_I2CM_SET_MASK;
+
+    /* ACK enable + 8-bit transfer length */
+    TSB_I2C1->CR1 |=  TSB_I2C1_CR1_ACK_mask;
+    TSB_I2C1->CR1 &= ~TSB_I2C1_CR1_BC_MASK;
+
+     /*
+     TSB_I2C1->PRS = 2U; //set it as defuult -> divided by 1, otherwise OP_RSTA will se to '1' after first START condition - page 28
+     TSB_I2C1->CR1 = (TSB_I2C1->CR1 & ~I2C_CR1_SCK_mask) | 6U;   
+     */                   
+
+
+    /* Master/Transmitter default */
+    TSB_I2C1->CR2 = TSB_I2C1_CR2_MASTER_TRANSMITTER;
+
+    /* clear this when DMA is not used */
+    TSB_I2C1_IE_SELPINCD = 0;   
+
+}
+
+/*====================================== eeprom_write_byte ======================================*/
+
+static bool eeprom_write_byte(uint8_t reg_addr, uint8_t data)
+{
+    i2c_wait_bus_free();
+
+    /*======= Slave + W ==========*/
+    TSB_I2C1->DBR = (EEPROM_ADDR << 1) | I2C_WRITE;
+    i2c_start_condition();
+    i2c_wait_transmit_end();
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }  /* check the acknowlagde signal : LBB = 0 -> ACK, LRB = 1 -> NACK */
+
+    /*========= reg address ========*/
+    TSB_I2C1->DBR = reg_addr;
+    i2c_wait_transmit_end();
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+    /*=========== Data ==============*/
+    TSB_I2C1->DBR = data;
+    i2c_wait_transmit_end();
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+    i2c_stop_condition();
+    return true;
+}
+
+/*====================================== eeprom_read_byte ======================================*/
+
+static bool eeprom_read_byte(uint8_t reg_addr, uint8_t *pdata)
+{
+   
+    i2c_wait_bus_free();
+
+    /*=========== Slave + W =============*/
+    TSB_I2C1->DBR = (EEPROM_ADDR << 1) | I2C_WRITE;
+    i2c_start_condition();
+    i2c_wait_transmit_end();
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+    /*=========== reg address ============*/
+    TSB_I2C1->DBR = reg_addr;
+    i2c_wait_transmit_end();
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+    /*============ Repeated START + Slave + R ==================*/
+    i2c_repeated_start(EEPROM_ADDR);
+    i2c_wait_transmit_end();
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+    
+    /* announcing that NACK will be sent after recieving one byte */
+    TSB_I2C1->OP  |= TSB_I2C1_OP_MFACK_mask;   
+
+    /* 
+    the only way to start a transmit sequence as a reciever is to eighter set CR2_PIN = 1
+     or write "dummy" 0x00 to DBR - pa ge 29
+     */
+    TSB_I2C1->DBR  = 0x00U;
+
+    i2c_wait_transmit_end();                         
+
+    *pdata = (uint8_t)TSB_I2C1->DBR;           
+
+    
+    i2c_stop_condition();
+    
+    /* clear MFACK and SREN */
+    TSB_I2C1->OP &= ~(TSB_I2C1_OP_MFACK_mask |        
+                      TSB_I2C1_OP_SREN_mask);
+    return true;
+}
+
+/*====================================== EEPROM_24C02_WrSingle ======================================*/
+
+void EEPROM_24C02_WrSingle(uint8_t wAddr, uint8_t wData) {
+    uint8_t wr_dat[2];
+
+    wr_dat[0] = wAddr;
+    wr_dat[1] = wData;
+    
+    if(false == eeprom_write_byte( wAddr,  wData)){
+           /* signal error */
+    }
+ }
+
+ /*====================================== EEPROM_24C02_RdSingle ======================================*/
+
+ uint8_t EEPROM_24CO2_RdSingle(uint8_t rAddr) {
+    uint8_t rd_dat[1];
+    uint8_t wr_dat[1];
+
+    wr_dat[0] = rAddr;
+
+    if ( false == eeprom_read_byte( wr_dat, rd_dat) ) {
+        /* signal error */
+    }
+
+    return rd_dat[0];
+}
+
+
+

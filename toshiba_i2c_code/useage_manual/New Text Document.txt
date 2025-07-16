@@ -1,0 +1,313 @@
+/**
+ * @file main.c
+ * @brief Main function for TOSHIBA_i2c_usage_example application.
+ */
+
+/**
+ * Any initialization code needed for MCU to function properly.
+ * Do not remove this line or clock might not be set correctly.
+ */
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+#include "mcu.h"
+#include <stdbool.h>
+
+
+
+typedef struct
+{
+    volatile uint32_t CR1;     /* 0x0000  I2C control register 1            */
+    volatile uint32_t DBR;     /* 0x0004  Data buffer (TX/RX)               */
+    volatile uint32_t AR;      /* 0x0008  1st slave?address / ALS?bit       */
+
+    union {                    /* 0x000C  Dual?mapped register:             */
+        volatile uint32_t CR2; /*          writes go to Control?2           */
+        volatile uint32_t SR;  /*          reads  give Status               */
+    };
+
+    volatile uint32_t PRS;     /* 0x0010  Prescaler?clock setting           */
+    volatile uint32_t IE;      /* 0x0014  Interrupt enable                  */
+    volatile uint32_t ST;      /* 0x0018  Interrupt status / clear          */
+    volatile uint32_t OP;      /* 0x001C  Expanded?function register        */
+    volatile uint32_t PM;      /* 0x0020  Bus?pin monitor                   */
+    volatile uint32_t AR2;     /* 0x0024  2nd slave?address                 */
+
+} I2C_TypeDef;
+
+/* Kanalski pokaziva?                                                        */
+I2C_TypeDef *i2c_registers;
+
+/* ----------------------------------------------------------------
+ *  BIT MASKS
+ * ---------------------------------------------------------------- */
+#define BIT3                        (1U << 3)      /* PD3 ? SCL */
+#define BIT4                        (1U << 4)      /* PD4 ? SDA */
+
+/* ----  CR1  ---- */
+#define TSB_I2C1_CR1_BC_pos         5
+#define TSB_I2C1_CR1_BC_MASK        (0x07U << TSB_I2C1_CR1_BC_pos)
+#define TSB_I2C1_CR1_ACK_pos        4
+#define TSB_I2C1_CR1_ACK_mask       (0x01U << TSB_I2C1_CR1_ACK_pos)
+#define TSB_I2C1_CR1_NOACK_pos      3
+#define TSB_I2C1_CR1_NOACK_mask     (0x01 << TSB_I2C1_CR1_NOACK_pos)
+
+/* ----  CR2  ---- */
+#define TSB_I2C1_CR2_MST_pos        7
+#define TSB_I2C1_CR2_MST_mask       (0x01U << TSB_I2C1_CR2_MST_pos)
+#define TSB_I2C1_CR2_TRX_pos        6
+#define TSB_I2C1_CR2_TRX_mask       (0x01U << TSB_I2C1_CR2_TRX_pos)
+#define TSB_I2C1_CR2_BB_pos         5
+#define TSB_I2C1_CR2_BB_mask        (0x01U << TSB_I2C1_CR2_BB_pos)
+#define TSB_I2C1_CR2_PIN_pos        4
+#define TSB_I2C1_CR2_PIN_mask       (0x01U << TSB_I2C1_CR2_PIN_pos)
+#define TSB_I2C1_CR2_I2CM_pos       3
+#define TSB_I2C1_CR2_I2CM_mask      (0x01U << TSB_I2C1_CR2_I2CM_pos)
+#define TSB_I2C1_CR2_SWRES_mask     0x03
+
+//------------------------------------------------------------------
+
+
+
+#define START_CONDITION_MASK        0xF8   /* MST,TRX,BB,PIN = 1 + I2CM = 1*/
+#define STOP_CONDITION_MASK         0xD8   /* MST,TRX,PIN = 1, BB = 0 + I2CM = 1 */
+#define TSB_I2C1_I2CM_SET_MASK      0X08
+
+//-----------------------------------------------------------------
+
+/* ----  SR  ---- */
+#define TSB_I2C1_SR_BB_pos          5
+#define TSB_I2C1_SR_BB_mask         (0x01U << TSB_I2C1_SR_BB_pos)
+#define TSB_I2C1_SR_PIN_pos         4
+#define TSB_I2C1_SR_PIN_mask        (0x01U << TSB_I2C1_SR_PIN_pos)
+#define TSB_I2C1_SR_LRB_mask        0x01U          /* bit-0 */
+
+/* ----  OP  ----  */
+#define TSB_I2C1_OP_SREN_pos        1
+#define TSB_I2C1_OP_SREN_mask       (0x01U << TSB_I2C1_OP_SREN_pos)
+#define TSB_I2C1_OP_MFACK_pos       0
+#define TSB_I2C1_OP_MFACK_mask      (0x01U << TSB_I2C1_OP_MFACK_pos)
+
+/* ----  PRS / CR1.SCK  ---- */
+#define I2C_PRS_PRSCK_pos           0
+#define I2C_PRS_PRSCK_mask          (0x1FU << I2C_PRS_PRSCK_pos)
+#define I2C_CR1_SCK_pos             0
+#define I2C_CR1_SCK_mask            (0x07U << I2C_CR1_SCK_pos)
+
+//--------------------AR MASKS------------------------------------
+
+#define TSB_I2C1_AR_SA_pos        1
+#define TSB_I2C1_AR_SA_mask       (0x7F << TSB_I2C1_AR_SA_pos)
+
+#define TSB_I2C1_AR_ASL_mask     0x01
+
+
+#define slave_addr               0x50
+#define reg                      0x00
+#define dat                     0xAB
+
+
+
+
+int main(void)
+{
+    /* Do not remove this line or clock might not be set correctly. */
+    #ifdef PREINIT_SUPPORTED
+    preinit();
+    #endif
+
+    i2c_registers = 0x400D2000UL;
+    uint8_t recieved_data;
+    
+    
+    /* ===========================================================5.1.1. Device Initialization================================================================= */
+
+     /* Clock-gating: PORT-D + I²C1 */
+    TSB_CG_FSYSMENA_IPMENA03 = 1;
+    TSB_CG_FSYSMENA_IPMENA26 = 1;
+
+    TSB_PD -> IE  |= BIT3 | BIT4;
+    TSB_PD -> OD  |= BIT3 | BIT4;
+    TSB_PD -> CR  |= BIT3 | BIT4;
+    TSB_PD -> FR2 |= BIT3 | BIT4;
+
+
+    /* ensure SDA and SCL pins are high (buss is free) */
+    TSB_PD -> DATA |= BIT3 | BIT4;
+
+    /* I²C bus enable */
+    TSB_I2C1->CR2 = TSB_I2C1_I2CM_SET_MASK;
+
+    /* set acknowladge mod(ACK) and address match for slave mod only(NOACK) */
+    TSB_I2C1 -> CR1 |= TSB_I2C1_CR1_ACK_mask;
+    TSB_I2C1 -> CR1 &= ~TSB_I2C1_CR1_NOACK_mask;
+    
+    /* set data length to 8 bits */
+    TSB_I2C1->CR1 &= ~TSB_I2C1_CR1_BC_MASK;
+
+    TSB_I2C1->PRS = 2U; //set it as defuult -> divided by 1, otherwise OP_RSTA will se to '1' after first START condition - page 28
+    TSB_I2C1->CR1 = (TSB_I2C1->CR1 & ~I2C_CR1_SCK_mask) | 6U; //                      ?
+
+    
+    // TSB_I2C1 -> AR |= ((slave_addr << TSB_I2C1_AR_SA_pos) & TSB_I2C1_AR_SA_mask);  
+    TSB_I2C1 -> AR &= ~TSB_I2C1_AR_SA_mask; // doesnt matter since device will be used as master only                                      
+    TSB_I2C1 -> AR &= ~TSB_I2C1_AR_ASL_mask; //ASL must be 0 for i2c bus mode - page 25
+    
+    /* configure device as a slave reciever */
+    TSB_I2C1->CR2 = 0x18;
+
+  
+
+
+    /* clear this when DMA is not used */
+    TSB_I2C1_IE_SELPINCD = 0;   
+
+    /* ================================================5.1.2. Generating of START condition and slave address================================================ */
+   
+    /* wait for buss to be free */
+    while(TSB_I2C1->SR & TSB_I2C1_SR_BB_mask){ /* WAIT */ };
+    
+    /* ACK must be set to '1' before generating START condition - page 22 */
+    TSB_I2C1->CR1 |= TSB_I2C1_CR1_ACK_mask;
+    
+    /* ======= SLAVE ADDRESS + W =========== */
+    TSB_I2C1->DBR  = (slave_addr << 1) | 0x00;
+    
+    /*
+     this generates START condition - page 22 
+     it wil take T_high until SCL pin falls after START condition - page 43
+    */
+    TSB_I2C1->CR2 = START_CONDITION_MASK;
+
+   /* =====================================================5.1.3. 1 word of data transfer - MASTER TRANSMITTER-=================================================== */
+    
+    /* At the end of a data word transfer, on the falling edge of 9th clock(ACK clock), INTI2Cx is generted -> SR_PIN = 0(SCL is pulled LOW) - page 29,43 */
+    while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask) {/* busy wait */ }
+    
+    /* check the acknowlagde signal : LBB = 0 -> ACK, LRB = 1 -> NACK */
+     if ((TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) == 0){
+            /* 
+            writing data to DBR sets CR2_PIN = 1 which causes the SCL pin to generate a serial clock for transferring a next data word
+            and and the SDA pin to transfer the data word - page 29,44
+            */
+            TSB_I2C1->DBR = reg;
+
+     }else{
+        /* 
+        ACK no detected -> start STOP condition - page 44 
+        this generates a STOP condition - page 22,49
+        */
+            TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+
+     }
+     
+     /* to transmit more data just repeat the process*/
+     while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask) {/* busy wait */ }
+     
+
+     if ((TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) == 0){
+            TSB_I2C1->DBR = dat;
+
+     }else{
+                    TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+
+     }
+
+     while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask) {/* busy wait */ }
+
+     if ((TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) == 0){
+     /* even if the receiver requests the next data(ACK), a STOP condition can be issued - page 44 */
+                 TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+
+
+     }else{
+        /* generate stop */
+                 TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+
+     }
+
+/*============================== 5.1.5. Procedure of Repeated START - In case of [I2CxOP]<SREN>=0=========================================*/
+    
+    
+
+   /* wait for buss to be free */
+   while(TSB_I2C1->SR & TSB_I2C1_SR_BB_mask){ /* WAIT */ };
+    
+
+   TSB_I2C1->DBR = (slave_addr << 1) | 0;            /* 0xA0 */
+   TSB_I2C1->CR2 = START_CONDITION_MASK;             /* 0xF8 */
+   while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask){/* WAIT */}     /* INTI2C ? PIN=0 */
+
+     if ((TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) == 0){
+              TSB_I2C1->DBR = reg;                              /* word?adr */
+
+
+     }else{
+        /* generate stop */
+                 TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+
+     }
+
+    
+    while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask) ;
+
+     if ((TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) == 0){
+               /* --- Repeated?START, sada READ ------------------------------ */
+    TSB_I2C1->OP  |= TSB_I2C1_OP_SREN_mask;           /* (a) SREN=1 dok je BB=1 */
+
+    TSB_I2C1->DBR  = (slave_addr << 1) | 1;           /* (b) 0xA1 */
+
+    TSB_I2C1->CR2  = START_CONDITION_MASK;            /* (c)+(d) Re?START */
+                                                     /* 0xF8 : MST|TRX|BB|PIN|I2CM */
+
+
+     }else{
+        /* generate stop */
+                 TSB_I2C1->CR2 = STOP_CONDITION_MASK;
+
+     }
+
+   
+
+    while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask){/* WAIT */}     /* ?ekaj INTI2C */
+    
+    if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) {       /* NACK ? */
+    TSB_I2C1->CR2 = STOP_CONDITION_MASK;         /* slave se nije javio */
+    }
+
+    /* TRX = 0, automatski se clearovao kada se poslato slave_addr + R */
+    /* --- Master?receiver: jedan bajt, NACK ---------------------- */
+    TSB_I2C1->OP  |=  TSB_I2C1_OP_MFACK_mask;         /* Tra?imo NACK posle (jedinog) bajta */
+
+    TSB_I2C1->DBR  = 0x00;                            /* 2. Dummy upis podi?e PIN i pu?ta 8 taktova */
+
+    while (TSB_I2C1->SR & TSB_I2C1_SR_PIN_mask) ;
+
+    recieved_data = (uint8_t)TSB_I2C1->DBR;                  /* preuzmi podatak */
+
+    /* --- STOP --------------------------------------------------- */
+    TSB_I2C1->CR2 = STOP_CONDITION_MASK;              /* 0xD8 : MST|TRX|PIN|I2CM */
+
+    TSB_I2C1->OP &= ~(TSB_I2C1_OP_MFACK_mask |        /* o?isti MFACK i SREN */
+                      TSB_I2C1_OP_SREN_mask);
+
+
+
+
+
+
+
+
+    /* Replace with your application code */
+    while (1)
+    {
+    }
+
+    return 0;
+}

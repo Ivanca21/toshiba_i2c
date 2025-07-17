@@ -107,6 +107,8 @@ void EEPROM_24C02_WrSingle(uint8_t wAddr, uint8_t wData);
 
 uint8_t EEPROM_24CO2_RdSingle(uint8_t rAddr);
 
+static bool i2c_master_write(uint8_t reg_addr, uint8_t* data_arr, uint8_t num_of_bytes);
+
 bool array_equal_u8(const uint8_t *a,
                     const uint8_t *b,
                     uint8_t len);
@@ -156,7 +158,7 @@ int main(void)
      i2c_master_init();
 
       for(i = 0; i < ARRAY_LENGTH; i++) {
-         EEPROM_24C02_WrSingle(i,i);
+        EEPROM_24C02_WrSingle(i,i);
          write_buffer[i] = i;
          for (volatile uint32_t i = 0; i < 1000UL; ++i) { __asm__("nop"); }
      }
@@ -166,12 +168,11 @@ int main(void)
 
     for (i = 0; i < ARRAY_LENGTH; i++) {
        read_buffer[i] = EEPROM_24CO2_RdSingle(i);
-       /* 
-       delay is not needed for reading,the reason delay is needed when weriting is becaus its EEPROM that acually has a delay time 
-       in between recieveing data
-       */
-       //for (volatile uint32_t i = 0; i < 1000UL; ++i) { __asm__("nop"); }  
-    }
+        
+            //delay is not needed for reading,the reason delay is needed when weriting is becaus its EEPROM that acually has a delay time 
+            //in between recieveing data
+            //for (volatile uint32_t i = 0; i < 1000UL; ++i) { __asm__("nop"); }  
+     }
 
     int bp2 = 0;
 
@@ -183,9 +184,27 @@ int main(void)
 
     int bp3 = 0;
   
-    while (1) { }
+    /*=========================================== TEST 4 ============================================*/
 
-    return 0;
+    //  i2c_master_init();
+      
+
+    //   for(i = 0; i < ARRAY_LENGTH; i++) {
+    //     write_buffer[i] = i;
+    //  }
+
+    //  if(false == i2c_master_write(0x00,write_buffer,ARRAY_LENGTH)){
+    //         /* do something */
+    //      }
+    //      for (volatile uint32_t i = 0; i < 1000UL; ++i) { __asm__("nop"); }
+     
+    //  int bp1 = 0;
+
+
+
+    // while (1) { }
+
+    // return 0;
 }
 
 /* ================================================================
@@ -370,60 +389,62 @@ void EEPROM_24C02_WrSingle(uint8_t wAddr, uint8_t wData) {
     }
  }
 
-//  /*====================================== EEPROM_24C02_RdSingle ======================================*/
+ /*====================================== EEPROM_24C02_RdSingle ======================================*/
 
-//  uint8_t EEPROM_24CO2_RdSingle(uint8_t rAddr) {
-//     uint8_t rd_dat;
+ uint8_t EEPROM_24CO2_RdSingle(uint8_t rAddr) {
+    uint8_t rd_dat;
 
-//     if ( false == eeprom_read_byte( rAddr, &rd_dat) ) {
-//         /* signal error */
-//     }
+    if ( false == eeprom_read_byte( rAddr, &rd_dat) ) {
+        /* signal error */
+    }
 
-//     return rd_dat;
-// }
+    return rd_dat;
+}
 
-//  /*====================================== array_equal_u8 ======================================*/
+ /*====================================== array_equal_u8 ======================================*/
 
-// bool array_equal_u8(const uint8_t *a,
-//                     const uint8_t *b,
-//                     uint8_t len)
-// {
-//     for (uint8_t i = 0; i < len; ++i) {
-//         if (a[i] != b[i]) {
-//             return false;      /* prvi razl. bajt → nisu isti  */
-//         }
-//     }
-//     return true;               /* svi elementi jednaki          */
-// }
+bool array_equal_u8(const uint8_t *a,
+                    const uint8_t *b,
+                    uint8_t len)
+{
+    for (uint8_t i = 0; i < len; ++i) {
+        if (a[i] != b[i]) {
+            return false;      /* prvi razl. bajt ? nisu isti  */
+        }
+    }
+    return true;               /* svi elementi jednaki          */
+}
 
 //  /*====================================== i2c_master_write ======================================*/
 
-// static bool i2c_master_write(uint8_t reg_addr, uint8_t data, uint8_t num_of_bytes)
-// {
-//     if(num_of_bytes == 1){
-//     i2c_wait_bus_free();
-
-//     /*======= Slave + W ==========*/
-//     TSB_I2C1->DBR = (EEPROM_ADDR << 1) | I2C_WRITE;
-//     i2c_start_condition();
-//     i2c_wait_transmit_end();
-//     if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }  /* check the acknowlagde signal : LBB = 0 -> ACK, LRB = 1 -> NACK */
-
-//     /*========= reg address ========*/
-//     TSB_I2C1->DBR = reg_addr;
-//     i2c_wait_transmit_end();
-//     if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
-
-//     /*=========== Data ==============*/
-//     TSB_I2C1->DBR = data;
-//     i2c_wait_transmit_end();
-//     if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
-
-//     i2c_stop_condition();
-//     return true;
-//     }else{
-
-//     }
+static bool i2c_master_write(uint8_t reg_addr, uint8_t* data_arr, uint8_t num_of_bytes)
+{
     
-// }
+        i2c_wait_bus_free();
+
+        /*======= Slave + W ==========*/
+        TSB_I2C1->DBR = (EEPROM_ADDR << 1) | I2C_WRITE;
+        i2c_start_condition();
+        i2c_wait_transmit_end();
+        if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }  /* check the acknowlagde signal : LBB = 0 -> ACK, LRB = 1 -> NACK */
+
+        /*========= reg address ========*/
+        TSB_I2C1->DBR = reg_addr;
+        i2c_wait_transmit_end();
+        if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+        for(uint8_t i = 0; i < num_of_bytes; i++){
+            /*=========== Data ==============*/
+            TSB_I2C1->DBR = data_arr[i];
+            i2c_wait_transmit_end();
+            if (TSB_I2C1->SR & TSB_I2C1_SR_LRB_mask) { i2c_stop_condition(); return false; }
+
+        }
+ 
+        i2c_stop_condition();
+        return true;
+
+}
+    
+
 

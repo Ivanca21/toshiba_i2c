@@ -1,0 +1,346 @@
+/**
+ * @file main.c
+ * @brief Main function for TOSHIBA_spi application.
+ */
+
+/**
+ * Any initialization code needed for MCU to function properly.
+ * Do not remove this line or clock might not be set correctly.
+ */
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+#include "mcu.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+
+typedef struct
+{
+  volatile uint32_t CR0;               /*!< TSPI Control Register 0                      */
+  volatile uint32_t CR1;               /*!< TSPI Control Register 1                      */
+  volatile uint32_t CR2;               /*!< TSPI Control Register 2                      */
+  volatile uint32_t CR3;               /*!< TSPI Control Register 3                      */
+  volatile uint32_t BR;                /*!< TSPI Baud Rate Generator Control Register    */
+  volatile uint32_t FMTR0;             /*!< TSPI Format Control Register 0               */
+  volatile uint32_t FMTR1;             /*!< TSPI Format Control Register 1               */
+  volatile uint32_t SECTCR0;           /*!< TSPI Sector Mode Control Register 0          */
+  volatile uint32_t SECTCR1;           /*!< TSPI Sector Mode Control Register 1          */
+       uint32_t RESERVED0[55];
+  volatile uint32_t DR;                /*!< TSPI Data Register                           */
+       uint32_t RESERVED1[63];
+  volatile uint32_t SR;                /*!< TSPI Status Register                         */
+  volatile uint32_t ERR;               /*!< TSPI Parity Error Flag Register              */
+}TSPI1_TypeDef;
+
+
+TSPI1_TypeDef *spi_register;
+
+
+typedef struct
+{
+  volatile uint32_t DATA;              /*!< Port G Data Register                         */
+  volatile uint32_t CR;                /*!< Port G Output Control Register               */
+  volatile uint32_t FR1;               /*!< Port G Function Register 1                   */
+       uint32_t RESERVED0[2];
+  volatile uint32_t FR4;               /*!< Port G Function Register 4                   */
+  volatile uint32_t FR5;               /*!< Port G Function Register 5                   */
+       uint32_t RESERVED1[3];
+  volatile uint32_t OD;                /*!< Port G Open Drain Control Register           */
+  volatile uint32_t PUP;               /*!< Port G Pull-up Control Register              */
+  volatile uint32_t PDN;               /*!< Port G Pull-down Control Register            */
+       uint32_t RESERVED2;
+  volatile uint32_t IE;                /*!< Port G Input Control Register                */
+} PORT_G;
+
+PORT_G *PORT_G_register;
+
+/* tspi kanal 1 type 2 - page 60 */
+#define PERIF_BASE        0x40000000UL
+#define CH1_TYPE2_BASE   0x00CA400UL
+
+#define BIT3                        (1U << 3)      
+#define BIT4                        (1U << 4)
+#define BIT0                        (1U << 0)      
+#define BIT1                        (1U << 1)      
+#define BIT2                        (1U << 2)      
+#define BIT5                        (1U << 5)     
+#define BIT6                        (1U << 6)    
+#define BIT7                        (1U << 7)  
+
+/* MASKS */
+
+/* CR1 */
+#define CR1_SWRST10_mask           (0x02 << 6)
+#define CR1_SWRST01_mask           (0x01 << 6)
+#define CR1_TSPIMS_mask            (0x01 << 13)
+#define CR1_MSTR_mask              (0x01 << 12)
+#define CR1_TMMD_mask              (0x03 << 10)
+#define CR1_CSSEL_mask             (0x03 << 8)
+#define CR1_FC_mask                (0xFF << 0)
+#define CR1_TRGEN_mask             (0x01 << 15)
+#define CR1_TRXE_mask              (0x01 << 14)
+
+
+/* SECTCR0 */
+#define SECTCR0_SECT_mask          (0x01 << 0)
+
+
+/* SR */
+#define SR_TSPISUE_mask            (0x01 << 31)
+#define SR_TXEND_mask              (0x01 << 22)
+#define SR_RLVL_mask               (0x0F)
+
+/* CR0 */
+#define CR0_TSPIE_mask             (0x01 << 0)
+
+/* FMTR0 */
+#define FMTR0_DIR_mask             (0x01 << 31)
+#define FMTR0_CS0POL_mask          (0x01 << 16)
+#define FMTR0_CKPOL_mask           (0x01 << 14)
+#define FMTR0_CKPHA_mask           (0x01 << 15)
+
+
+
+
+
+int main(void)
+{
+    /* Do not remove this line or clock might not be set correctly. */
+    #ifdef PREINIT_SUPPORTED
+    preinit();
+    #endif
+
+    uint32_t frame;
+
+    //spi_register = PERIF_BASE + CH1_TYPE2_BASE;
+    spi_register = (TSPI1_TypeDef *)(PERIF_BASE + CH1_TYPE2_BASE);
+    PORT_G_register = (PORT_G *)(0x40000000UL + 0x00E0600UL);
+
+    /* clock enable for PG and SPI*/
+    TSB_CG_FSYSMENA_IPMENA06 = 1;   
+    TSB_CG_FSYSMENA_IPMENA20 = 1;
+
+    /*
+    MIKROBUS 2:
+    CS - PG1
+    SCK - PG6
+    MISO - PG4
+    MOSI - PG5
+    */
+    TSB_PG -> CR |= BIT1;
+    TSB_PG -> FR1 |= BIT1;
+    TSB_PG -> IE &= ~BIT1;
+
+    TSB_PG -> DATA &= ~BIT6;
+    TSB_PG -> CR |= BIT6;
+    TSB_PG -> FR1 |= BIT6;
+    TSB_PG -> IE &= ~BIT6;
+
+    TSB_PG -> CR &= ~BIT4;
+    TSB_PG -> FR1 |= BIT4;
+    TSB_PG -> IE |= BIT4;
+
+    TSB_PG -> CR |= BIT5;
+    TSB_PG -> FR1 |= BIT5;
+    TSB_PG -> IE &= ~BIT5;
+    
+    /*======================================================SPI INIT======================================================================  */
+    
+    /*==================================== CRO ===================================  */
+    /*  
+        software reset -> this will set SR_TSPISUE = 0 which will enable TSPI modification
+        SR_TSPISUE = 1 -> blokada registra
+        kad asetujes TRXE = 1 ili TRGEN = 1 -> TSPISUE ce se setovati na 1
+    */
+    spi_register -> CR0 = CR1_SWRST10_mask;
+    spi_register -> CR0 = CR1_SWRST01_mask;
+
+    /*
+     Set <TSPIE> = 1 (operation) to start operation first. 
+     Then perform initialization and communications.
+     <TSPIE> is not initialized by software reset. - page 61
+    */
+     spi_register ->CR0 |= CR0_TSPIE_mask;
+    
+    /* ----- čekaj dok se TSPISUE ne spusti na 0 ----- */
+    while (spi_register->SR & SR_TSPISUE_mask) {}
+
+    
+    /*==================================== SECTCR0 ================================= */
+    /* select FRAME mode */
+    spi_register -> SECTCR0 &= ~SECTCR0_SECT_mask;
+
+
+
+    /*====================================== SR ==================================== */ 
+    /*
+    2. Enable TSPI_SR modification() 
+    When <TSPISUE> is "0", the TSPI is not transmitting or receiving, thus
+    the register setting can be modified.
+    <TSPISUE> is "0" in the following conditions: 
+    1.Software reset occurs
+    */
+     //spi_register -> SR &= ~SR_TSPISUE_mask;
+
+    /*====================================== CR1 ==================================== */
+    /*
+     CR1 NOTES:
+     FULL DUPLEX start transmit/receive transfer : CR1_TRXE = 1;
+    */
+
+   
+    //spi_register -> CR1 |= CR1_MSTR_mask;            /* MASTER */
+   // spi_register -> CR1 &= ~CR1_TSPIMS_mask;          /* SPI MDOE */
+    //spi_register -> CR1 |= CR1_TMMD_mask;             /* FULL DUPLEX */
+    //spi_register -> CR1 &= ~CR1_CSSEL_mask;           /* TSPIxCS0 is valid */
+    //spi_register -> CR1 &= ~CR1_FC_mask;              /* continuous transfer */
+    //spi_register -> CR1 &= ~CR1_TRGEN_mask;           /* trigger control not used */
+
+    /* MASTER, SPI MODE, FUL DUPLEX, TSPIxCS1,continuous transfer, trigger control not used  */
+    spi_register -> CR1 = 0x00001D00;
+   
+
+
+    
+    /*====================================== BR ==================================== */
+    /*badu rate*/
+    spi_register -> BR = 0x03;
+
+
+    /*====================================== FMTR0 ==================================== */
+    /*
+     FMTR0 NOTES:
+      All data in the FIFO are discarded if <FL[5:0]> is changed remaining data in the FIFO even if
+     [TSPIxSR]<TSPISUE> is "0".
+
+     When use 1st edge data sampling of master operation,
+    "Setting value (Integer multiple of TSPIxSCK) + 0.5 × TSPIxSCK".
+    */
+    /* MSB 1ST, NEGATIVE LOGIC CS1, DATA SAMPLED ON RISING EDGE, TSPIxSCK IS LOW LEVE AT IDLE */
+      spi_register -> FMTR0 = 0x88000411;
+
+    
+    
+    /* write data to transmit FIFO */
+    /*
+     citanje iz DR citas zapravo vrednost iz RX registra - to vidis u DEBUGU
+     debug provera da li se podatak poslao : SR_TVLV treba da se inkrementira, 20. bit je transmit emty flag i on je koristan
+    */
+    //spi_register -> DR = 0xAB;
+
+     
+
+    /* 
+     start transfer 
+     TSPISUE ce se setovati na 1 posle ovoga i registri ce biti zablokirani
+    */
+    //spi_register -> CR1 |= CR1_TRXE_mask; 
+
+    /* 1. WRITE instrukcija (MSB‑first → u gornji bajt) */
+frame = 0x02UL;
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+
+/* 2‑4. Adresa 0x00 */
+frame = 0x00UL;   /* pomeri tako da MSB bude u bit‑ovima 31‑24 */
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+/* 2‑4. Adresa 0x00 */
+frame = 0x00UL;   /* pomeri tako da MSB bude u bit‑ovima 31‑24 */
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+/* 2‑4. Adresa 0x10 */
+frame = 0x10UL;   /* pomeri tako da MSB bude u bit‑ovima 31‑24 */
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+/* 5. Podatak 0xAB */
+frame = 0xABUL;
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+
+/* 1) READ (0x03) */
+spi_register->DR = 0x03;
+spi_register->CR1 |= CR1_TRXE_mask;                // start
+spi_register->CR1 &= ~CR1_TRXE_mask;               // stop frame
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+
+/* 2‑4. Adresa 0x00 */
+frame = 0x00UL;   /* pomeri tako da MSB bude u bit‑ovima 31‑24 */
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+/* 2‑4. Adresa 0x00 */
+frame = 0x00UL;   /* pomeri tako da MSB bude u bit‑ovima 31‑24 */
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+/* 2‑4. Adresa 0x10 */
+frame = 0x10UL;   /* pomeri tako da MSB bude u bit‑ovima 31‑24 */
+spi_register->DR = frame;
+spi_register->CR1 |= CR1_TRXE_mask;
+
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while ((spi_register->SR & SR_TXEND_mask) == 0) {}
+
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+/* 5) Dummy byte da izvuče podatak iz SRAM‑a */
+spi_register->DR = 0x00;                      // sadržaj nebitan
+spi_register->CR1 |= CR1_TRXE_mask;
+
+/* čekaj da u RX FIFO stigne bajt */
+while ((spi_register->SR & SR_RLVL_mask)==0) {}
+uint8_t read_back = (uint8_t)spi_register->DR; // evo podatka
+spi_register->CR1 &= ~CR1_TRXE_mask;
+while (spi_register->SR & SR_TSPISUE_mask) {}
+
+    /* Replace with your application code */
+    while (1)
+    {
+    }
+
+    return 0;
+}

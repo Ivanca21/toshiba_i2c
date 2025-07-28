@@ -137,18 +137,21 @@ int main(void)
 
     //   uint8_t recieved_data = spi_read_frame(0x00000001);
 
-    //   uint8_t data = 0;
-      uint8_t flag = 1;
-      uint8_t write_buff[10];
-      uint8_t read_buffer[10];
+    //================================================================================
+
+     //   uint8_t data = 0;
 
     //  data = spi_register->DR;
 
     //  if(data == 0xAB){
     //     TSB_PK->DATA |= BIT1;
     //  }
-     
-    // uint8_t data = 0;
+
+    //================================================================================
+ 
+      uint8_t flag = 1;
+      uint8_t write_buff[10];
+      uint8_t read_buffer[10];
 
     for(uint8_t i = 0; i < 10; i++){
         spi_write_frame(i, i);
@@ -319,6 +322,8 @@ static void spi_write_frame(uint32_t address, uint8_t data){
 
 uint8_t spi_read_frame(uint32_t address)
 {
+     
+    
     /* --- flush ?stare? podatke --- */
     while (spi_register->SR & SR_RLVL_mask)
         (void)spi_register->DR;            /* prazni RX FIFO */
@@ -329,52 +334,31 @@ uint8_t spi_read_frame(uint32_t address)
     spi_register->CR1 |= CR1_TRXE_mask;
 
     while (!(spi_register->SR & SR_TFEMP_mask)){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
-      uint8_t data = spi_register->DR;
 
     spi_register->DR = address >> 16;
     while (!(spi_register->SR & SR_TFEMP_mask)){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
-       data = spi_register->DR;
 
     spi_register->DR = address >> 8;
     while (!(spi_register->SR & SR_TFEMP_mask)){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
-       data = spi_register->DR;
 
     spi_register->DR = address;            /* A[7:0] */
     while (!(spi_register->SR & SR_TFEMP_mask)){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
-       data = spi_register->DR;
 
+    while (!(spi_register->SR & SR_TFEMP_mask)){}
     spi_register->DR = 0x00;               /* dummy */
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
-       data = spi_register->DR;
+
+    uint8_t data = 0; 
+
+
+
+    while((spi_register->SR & SR_RLVL_mask) > 1){
+            data = spi_register->DR;
+            for(uint8_t i = 0; i < 3; i++) {}
+    }
+
+    data = spi_register->DR;
 
    
-
-    // /* --- ???? ??? ??? ?? ?????? ????? 1 --- */ 
-    // while ((spi_register->SR & SR_RLVL_mask) > 1)
-    //     (void)spi_register->DR;            /* ???? 0xFF???? */
-
-    
-
-    // /* --- ???????? ?? ??? ??????? --- */
-    // uint8_t data = (uint8_t)spi_register->DR;
-    // for(uint8_t i = 0; i < 100; i++) {}
-    // data = (uint32_t)spi_register->DR;
-    // for(uint8_t i = 0; i < 100; i++) {}
-    // data = (uint8_t)spi_register->DR;
-    // for(uint8_t i = 0; i < 100; i++) {}
-    // data = (uint8_t)spi_register->DR;
-    // for(uint8_t i = 0; i < 100; i++) {}
-    // data = (uint8_t)spi_register->DR;
-    
 
 
     /* --- stop + CS? --- */

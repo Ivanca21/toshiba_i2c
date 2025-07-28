@@ -1,0 +1,392 @@
+/**
+ * @file main.c
+ * @brief Main function for TOSHIBA_spi application.
+ */
+
+/**
+ * Any initialization code needed for MCU to function properly.
+ * Do not remove this line or clock might not be set correctly.
+ */
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+#include "mcu.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+
+typedef struct
+{
+  volatile uint32_t CR0;               /*!< TSPI Control Register 0                      */
+  volatile uint32_t CR1;               /*!< TSPI Control Register 1                      */
+  volatile uint32_t CR2;               /*!< TSPI Control Register 2                      */
+  volatile uint32_t CR3;               /*!< TSPI Control Register 3                      */
+  volatile uint32_t BR;                /*!< TSPI Baud Rate Generator Control Register    */
+  volatile uint32_t FMTR0;             /*!< TSPI Format Control Register 0               */
+  volatile uint32_t FMTR1;             /*!< TSPI Format Control Register 1               */
+  volatile uint32_t SECTCR0;           /*!< TSPI Sector Mode Control Register 0          */
+  volatile uint32_t SECTCR1;           /*!< TSPI Sector Mode Control Register 1          */
+       uint32_t RESERVED0[55];
+  volatile uint32_t DR;                /*!< TSPI Data Register                           */
+       uint32_t RESERVED1[63];
+  volatile uint32_t SR;                /*!< TSPI Status Register                         */
+  volatile uint32_t ERR;               /*!< TSPI Parity Error Flag Register              */
+}TSPI1_TypeDef;
+
+
+TSPI1_TypeDef *spi_register;
+
+
+typedef struct
+{
+  volatile uint32_t DATA;              /*!< Port G Data Register                         */
+  volatile uint32_t CR;                /*!< Port G Output Control Register               */
+  volatile uint32_t FR1;               /*!< Port G Function Register 1                   */
+       uint32_t RESERVED0[2];
+  volatile uint32_t FR4;               /*!< Port G Function Register 4                   */
+  volatile uint32_t FR5;               /*!< Port G Function Register 5                   */
+       uint32_t RESERVED1[3];
+  volatile uint32_t OD;                /*!< Port G Open Drain Control Register           */
+  volatile uint32_t PUP;               /*!< Port G Pull-up Control Register              */
+  volatile uint32_t PDN;               /*!< Port G Pull-down Control Register            */
+       uint32_t RESERVED2;
+  volatile uint32_t IE;                /*!< Port G Input Control Register                */
+} PORT_G;
+
+PORT_G *PORT_G_register;
+
+/* tspi kanal 1 type 2 - page 60 */
+#define PERIF_BASE        0x40000000UL
+#define CH1_TYPE2_BASE   0x00CA400UL
+
+#define BIT3                        (1U << 3)      
+#define BIT4                        (1U << 4)
+#define BIT0                        (1U << 0)      
+#define BIT1                        (1U << 1)      
+#define BIT2                        (1U << 2)      
+#define BIT5                        (1U << 5)     
+#define BIT6                        (1U << 6)    
+#define BIT7                        (1U << 7)  
+
+/* MASKS */
+
+/* CR1 */
+#define CR1_SWRST10_mask           (0x02 << 6)
+#define CR1_SWRST01_mask           (0x01 << 6)
+#define CR1_TSPIMS_mask            (0x01 << 13)
+#define CR1_MSTR_mask              (0x01 << 12)
+#define CR1_TMMD_mask              (0x03 << 10)
+#define CR1_CSSEL_mask             (0x03 << 8)
+#define CR1_FC_mask                (0xFF << 0)
+#define CR1_TRGEN_mask             (0x01 << 15)
+#define CR1_TRXE_mask              (0x01 << 14)
+
+
+/* SECTCR0 */
+#define SECTCR0_SECT_mask          (0x01 << 0)
+
+
+/* SR */
+#define SR_TSPISUE_mask            (0x01 << 31)
+#define SR_TXEND_mask              (0x01 << 22)
+#define SR_RLVL_mask               (0x0F)
+#define SR_TFEMP_mask               (0x01 << 20)
+#define SR_RXEND_mask              (0x01 << 6)
+/* CR0 */
+#define CR0_TSPIE_mask             (0x01 << 0)
+
+/* FMTR0 */
+#define FMTR0_DIR_mask             (0x01 << 31)
+#define FMTR0_CS0POL_mask          (0x01 << 16)
+#define FMTR0_CKPOL_mask           (0x01 << 14)
+#define FMTR0_CKPHA_mask           (0x01 << 15)
+
+void spi_init();
+
+static void spi_write_frame(uint32_t address, uint8_t data);
+
+uint8_t spi_read_frame(uint32_t address);
+
+
+
+
+
+
+int main(void)
+{
+    /* Do not remove this line or clock might not be set correctly. */
+    #ifdef PREINIT_SUPPORTED
+    preinit();
+    #endif
+
+    TSB_CG_FSYSMENA_IPMENA09 = 1; // Enable clock for PORTK.
+    TSB_PK->DATA &= ~BIT1;
+    TSB_PK->CR |= BIT1;
+
+    //spi_register = PERIF_BASE + CH1_TYPE2_BASE;
+    spi_register = (TSPI1_TypeDef *)(PERIF_BASE + CH1_TYPE2_BASE);
+    PORT_G_register = (PORT_G *)(0x40000000UL + 0x00E0600UL);
+
+    
+    spi_init();
+
+    
+
+    //   spi_write_frame(0x00000001, 0xAB);
+
+    //   uint8_t recieved_data = spi_read_frame(0x00000001);
+
+      uint8_t data = 0;
+      uint8_t flag = 1;
+      uint8_t write_buff[10];
+      uint8_t read_buffer[10];
+
+    //  data = spi_register->DR;
+
+    //  if(data == 0xAB){
+    //     TSB_PK->DATA |= BIT1;
+    //  }
+     
+    // uint8_t data = 0;
+
+    for(uint8_t i = 0; i < 10; i++){
+        spi_write_frame(i, i);
+        write_buff[i] = i;
+    }
+
+    for(uint8_t i =0; i < 10; i++){
+         read_buffer[i] = spi_read_frame(i);
+    }
+
+    for(uint8_t i = 0; i < 10; i++){
+        if(read_buffer[i] != write_buff[i]){
+               flag = 0;
+        }
+    }
+    
+
+    /* Replace with your application code */
+    while (1)
+    {
+    }
+
+    return 0;
+}
+
+
+void spi_init(){
+    /* clock enable for PG and SPI*/
+    TSB_CG_FSYSMENA_IPMENA06 = 1;   
+    TSB_CG_FSYSMENA_IPMENA20 = 1;
+
+    /*
+    MIKROBUS 1:
+    CS - PG0
+    SCK - PG6
+    MISO - PG4
+    MOSI - PG5
+    */
+    TSB_PG -> DATA |= BIT0;
+    TSB_PG -> CR |= BIT0;
+    TSB_PG -> IE &= ~BIT0;
+
+    //TSB_PG -> DATA &= ~BIT6;
+    TSB_PG -> FR1 |= BIT6;
+    TSB_PG -> CR |= BIT6;
+    TSB_PG -> IE &= ~BIT6;
+
+    TSB_PG -> CR &= ~BIT4;
+    TSB_PG -> FR1 |= BIT4;
+    TSB_PG -> IE |= BIT4;
+
+    TSB_PG -> CR |= BIT5;
+    TSB_PG -> FR1 |= BIT5;
+    TSB_PG -> IE &= ~BIT5;
+    
+    /*======================================================SPI INIT======================================================================  */
+    
+    /*==================================== CRO ===================================  */
+    /*  
+        software reset -> this will set SR_TSPISUE = 0 which will enable TSPI modification
+        SR_TSPISUE = 1 -> blokada registra
+        kad asetujes TRXE = 1 ili TRGEN = 1 -> TSPISUE ce se setovati na 1
+    */
+    spi_register -> CR0 = CR1_SWRST10_mask;
+    spi_register -> CR0 = CR1_SWRST01_mask;
+
+    /*
+     Set <TSPIE> = 1 (operation) to start operation first. 
+     Then perform initialization and communications.
+     <TSPIE> is not initialized by software reset. - page 61
+    */
+     spi_register ->CR0 |= CR0_TSPIE_mask;
+    
+    /* ----- ?ekaj dok se TSPISUE ne spusti na 0 ----- */
+    while (spi_register->SR & SR_TSPISUE_mask) {}
+
+    
+    /*==================================== SECTCR0 ================================= */
+    /* select FRAME mode */
+    spi_register -> SECTCR0 &= ~SECTCR0_SECT_mask;
+
+    /*====================================== CR1 ==================================== */
+    /*
+     CR1 NOTES:
+     FULL DUPLEX start transmit/receive transfer : CR1_TRXE = 1;
+    */
+
+   
+    //spi_register -> CR1 |= CR1_MSTR_mask;            /* MASTER */
+   // spi_register -> CR1 &= ~CR1_TSPIMS_mask;          /* SPI MDOE */
+    //spi_register -> CR1 |= CR1_TMMD_mask;             /* FULL DUPLEX */
+    //spi_register -> CR1 &= ~CR1_CSSEL_mask;           /* TSPIxCS0 is valid */
+    //spi_register -> CR1 &= ~CR1_FC_mask;              /* continuous transfer */
+    //spi_register -> CR1 &= ~CR1_TRGEN_mask;           /* trigger control not used */
+
+    /* MASTER, SPI MODE, FUL DUPLEX, TSPIxCS1,continuous transfer, trigger control not used  */
+    spi_register -> CR1 = 0x00001D00;
+   
+
+
+    
+    /*====================================== BR ==================================== */
+    /*badu rate*/
+    spi_register -> BR = 0x03;
+
+
+    /*====================================== FMTR0 ==================================== */
+    /*
+     FMTR0 NOTES:
+      All data in the FIFO are discarded if <FL[5:0]> is changed remaining data in the FIFO even if
+     [TSPIxSR]<TSPISUE> is "0".
+
+     When use 1st edge data sampling of master operation,
+    "Setting value (Integer multiple of TSPIxSCK) + 0.5 × TSPIxSCK".
+    */
+    /* MSB 1ST, NEGATIVE LOGIC CS1, DATA SAMPLED ON RISING EDGE, TSPIxSCK IS LOW LEVE AT IDLE */
+      spi_register -> FMTR0 = 0x88000411;
+
+    
+}
+
+static void spi_write_frame(uint32_t address, uint8_t data){
+
+    /* --- flush ?stare? podatke --- */
+    while (spi_register->SR & SR_RLVL_mask)
+        (void)spi_register->DR;            /* prazni RX FIFO */
+      
+      spi_register->DR = 0X02;
+      
+      TSB_PG->DATA &= ~BIT0;
+      spi_register->CR1 |= CR1_TRXE_mask;
+
+      while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+      
+      spi_register->DR = address >> 16;
+      
+       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+
+
+      spi_register->DR = address >> 8;
+
+       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+
+      spi_register->DR = address;
+
+       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+
+      spi_register->DR = data;
+
+       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+
+      //TSB_PG->DATA |= BIT0;   ovde se JOS NIJE ZAVRSIO TRANSFER PSOLEDNJEB BAJTA
+
+      
+      spi_register->CR1 &= ~CR1_TRXE_mask;
+
+      //TSB_PG->DATA |= BIT0; NI OVDE
+
+      while (spi_register->SR & SR_TSPISUE_mask) {}
+
+        TSB_PG->DATA |= BIT0;
+
+
+
+
+
+}
+
+uint8_t spi_read_frame(uint32_t address)
+{
+    /* --- flush ?stare? podatke --- */
+    while (spi_register->SR & SR_RLVL_mask)
+        (void)spi_register->DR;            /* prazni RX FIFO */
+
+    /* --- komanda + adresa + dummy --- */
+    spi_register->DR = 0x03;               /* READ */
+    TSB_PG->DATA &= ~BIT0;                 /* CS? */
+    spi_register->CR1 |= CR1_TRXE_mask;
+
+    while (!(spi_register->SR & SR_TFEMP_mask)){}
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    for(uint8_t i = 0; i < 100; i++) {}
+      uint8_t data = spi_register->DR;
+
+    spi_register->DR = address >> 16;
+    while (!(spi_register->SR & SR_TFEMP_mask)){}
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    for(uint8_t i = 0; i < 100; i++) {}
+       data = spi_register->DR;
+
+    spi_register->DR = address >> 8;
+    while (!(spi_register->SR & SR_TFEMP_mask)){}
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    for(uint8_t i = 0; i < 100; i++) {}
+       data = spi_register->DR;
+
+    spi_register->DR = address;            /* A[7:0] */
+    while (!(spi_register->SR & SR_TFEMP_mask)){}
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    for(uint8_t i = 0; i < 100; i++) {}
+       data = spi_register->DR;
+
+    spi_register->DR = 0x00;               /* dummy */
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    for(uint8_t i = 0; i < 100; i++) {}
+       data = spi_register->DR;
+
+   
+
+    // /* --- ???? ??? ??? ?? ?????? ????? 1 --- */ 
+    // while ((spi_register->SR & SR_RLVL_mask) > 2)
+    //     (void)spi_register->DR;            /* ???? 0xFF???? */
+
+    
+
+    // /* --- ???????? ?? ??? ??????? --- */
+    // uint8_t data = (uint8_t)spi_register->DR;
+    // for(uint8_t i = 0; i < 100; i++) {}
+    // data = (uint32_t)spi_register->DR;
+    // for(uint8_t i = 0; i < 100; i++) {}
+    // data = (uint8_t)spi_register->DR;
+    // for(uint8_t i = 0; i < 100; i++) {}
+    // data = (uint8_t)spi_register->DR;
+    // for(uint8_t i = 0; i < 100; i++) {}
+    // data = (uint8_t)spi_register->DR;
+    
+
+
+    /* --- stop + CS? --- */
+    spi_register->CR1 &= ~CR1_TRXE_mask;
+    while (spi_register->SR & SR_TSPISUE_mask) { }
+    TSB_PG->DATA |= BIT0;
+
+    return data;
+
+}
+
+
+
+
+

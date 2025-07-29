@@ -95,7 +95,9 @@ PORT_G *PORT_G_register;
 #define SR_TXEND_mask              (0x01 << 22)
 #define SR_RLVL_mask               (0x0F)
 #define SR_TFEMP_mask               (0x01 << 20)
-#define SR_RXEND_mask              (0x01 << 6)
+#define SR_RXEND_mask              (0x000001 << 6)
+#define SR_RFFLL_mask              (0x000001 << 4)
+
 /* CR0 */
 #define CR0_TSPIE_mask             (0x01 << 0)
 
@@ -105,15 +107,38 @@ PORT_G *PORT_G_register;
 #define FMTR0_CKPOL_mask           (0x01 << 14)
 #define FMTR0_CKPHA_mask           (0x01 << 15)
 
+#define TSPI_CR1_FC_Pos      0u
+#define TSPI_CR1_FC_Msk      (0xFFu << TSPI_CR1_FC_Pos)
+
+#define TSPI_CR1_FC(val)     (((uint32_t)(val) << TSPI_CR1_FC_Pos) & TSPI_CR1_FC_Msk)
+
+
 void spi_init();
-
-
-
-
 
 static void spi_write_frame(uint32_t address, uint8_t data);
 
 uint8_t spi_read_frame(uint32_t address);
+
+
+static inline void tspi_set_frame_count(TSPI1_TypeDef *spi, uint8_t fc)
+{
+
+    /* 2. Read‑modify‑write: očisti FC pa upiši novu vrednost.
+          CSSEL, TMMD, MSTR… ostaju kakvi jesu.          */
+    uint32_t reg = spi->CR1 & ~TSPI_CR1_FC_Msk;   /* sačuvaj sve osim FC   */
+    reg |= TSPI_CR1_FC(fc);                       /* novi FC               */
+    spi->CR1  = reg;                              /* upis nazad            */
+
+}
+
+static void spi_master_write(uint8_t* arr, uint8_t data_length);
+
+void sram_click_1_write(uint32_t address, uint8_t data_to_be_written);
+
+void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_len, uint8_t* read_data_buff, uint32_t read_data_len );
+
+
+
 
 
 
@@ -138,9 +163,44 @@ int main(void)
     
     spi_init();
 
+    /*=========================================================== TEST1 ==========================================================*/
+
        spi_write_frame(0x00000001, 0xAB);
 
       uint8_t recieved_data = spi_read_frame(0x00000001);
+
+    /*=========================================================== TEST2 ==========================================================*/
+
+    // uint8_t arr[10] = {0};
+    // arr[0] = 0x02;
+    // arr[1] = 0x00;
+    // arr[2] = 0x00;
+    // arr[3] = 0x01;
+    // arr[4] = 0xAB;
+
+    // spi_master_write(arr, 5);
+
+    /*=========================================================== TEST3 ==========================================================*/
+
+    //sram_click_1_write(0x000001, 0xAB);
+
+    /*=========================================================== TEST4 ==========================================================*/
+
+    // for(uint8_t i = 0; i < 10; i++){
+    //     sram_click_1_write(i,i);
+    // } 
+    //  uint8_t read_arr[10] = {0};
+    // uint8_t local_array[4] = {0};
+
+    // local_array[0] = 0x03;
+    // local_array[1] = 0x000000 >> 16;
+    // local_array[2] = 0x000000 >> 8;
+    // local_array[3] = 0x000000;
+
+    // spi_master_write_then_read(local_array, 4, read_arr, 10 );
+
+    /*=========================================================== TEST5 ==========================================================*/
+
 
     
 
@@ -311,30 +371,32 @@ uint8_t spi_read_frame(uint32_t address)
 
     while (!(spi_register->SR & SR_TFEMP_mask)){}
     while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
       uint8_t data = spi_register->DR;
 
     spi_register->DR = address >> 16;
     while (!(spi_register->SR & SR_TFEMP_mask)){}
     while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
        data = spi_register->DR;
 
     spi_register->DR = address >> 8;
     while (!(spi_register->SR & SR_TFEMP_mask)){}
     while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
        data = spi_register->DR;
 
     spi_register->DR = address;            /* A[7:0] */
     while (!(spi_register->SR & SR_TFEMP_mask)){}
     while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
        data = spi_register->DR;
 
     spi_register->DR = 0x00;               /* dummy */
+    while (!(spi_register->SR & SR_TFEMP_mask)){} // MORA OVO
+
     while ((spi_register->SR & SR_RXEND_mask) == 0) {}
-    for(uint8_t i = 0; i < 3; i++) {}
+       data = spi_register->DR;
+
+
+    while (!(spi_register->SR & SR_TFEMP_mask)){}
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
        data = spi_register->DR;
 
    
@@ -348,8 +410,89 @@ uint8_t spi_read_frame(uint32_t address)
     TSB_PG->DATA |= BIT0;
 
     return data;
+}
+
+
+static void spi_master_write(uint8_t* arr, uint8_t data_length){
+
+
+       /* --- flush ?stare? podatke --- */
+    while (spi_register->SR & SR_RLVL_mask)
+        (void)spi_register->DR;            /* prazni RX FIFO */
+
+    tspi_set_frame_count(spi_register, data_length);   
+
+
+    TSB_PG->DATA &= ~BIT0;
+    spi_register->CR1 |= CR1_TRXE_mask;    
+
+      for(uint8_t i = 0; i < data_length; i++){
+            spi_register->DR = arr[i];
+            while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+      }  
+
+      spi_register->CR1 &= ~CR1_TRXE_mask;
+ 
+      while (spi_register->SR & SR_TSPISUE_mask) {}
+
+      TSB_PG->DATA |= BIT0;
 
 }
+
+
+void sram_click_1_write(uint32_t address, uint8_t data_to_be_written){
+    uint8_t local_array[5] = {0};
+
+    local_array[0] = 0x02;
+    local_array[1] = address >> 16;
+    local_array[2] = address >> 8;
+    local_array[3] = address;
+    local_array[4] = data_to_be_written;
+
+
+
+    spi_master_write( local_array, 5);     
+
+}
+
+
+void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_len, uint8_t* read_data_buff, uint32_t read_data_len ){
+          /* --- flush ?stare? podatke --- */
+    while (spi_register->SR & SR_RLVL_mask)
+    (void)spi_register->DR;            /* prazni RX FIFO */
+
+     tspi_set_frame_count(spi_register, (write_data_len + read_data_len));   
+
+
+    TSB_PG->DATA &= ~BIT0;                 /* CS? */
+    spi_register->CR1 |= CR1_TRXE_mask;
+
+    uint8_t data = 0;
+
+    for(uint8_t i = 0; i < write_data_len; i++){
+        spi_register->DR = write_data_buff[i];               
+        while (!(spi_register->SR & SR_TFEMP_mask)){}
+        while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+        data = spi_register->DR;
+    }
+
+     while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+        data = spi_register->DR;
+
+
+    for(int i = 0; i < read_data_len; i++){
+        spi_register->DR = 0x00;               /* dummy */
+        while (!(spi_register->SR & SR_TFEMP_mask)){}
+        while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+        read_data_buff[i] = spi_register->DR;
+    }
+
+    spi_register->CR1 &= ~CR1_TRXE_mask;
+    while (spi_register->SR & SR_TSPISUE_mask) { }
+    TSB_PG->DATA |= BIT0;
+}
+
+
 
 
 

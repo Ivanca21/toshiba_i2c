@@ -125,16 +125,8 @@ static void spi_write_frame(uint32_t address, uint8_t data);
 uint8_t spi_read_frame(uint32_t address);
 
 
-static inline void tspi_set_frame_count(TSPI1_TypeDef *spi, uint8_t fc)
-{
+static inline void tspi_set_frame_count(TSPI1_TypeDef *spi, uint8_t fc);
 
-    /* 2. Read?modify?write: o?isti FC pa upi?i novu vrednost.
-          CSSEL, TMMD, MSTR? ostaju kakvi jesu.          */
-    uint32_t reg = spi->CR1 & ~TSPI_CR1_FC_Msk;   /* sa?uvaj sve osim FC   */
-    reg |= TSPI_CR1_FC(fc);                       /* novi FC               */
-    spi->CR1  = reg;                              /* upis nazad            */
-
-}
 
 static inline void assert_CS(){
     if(MIKROBUS_1){
@@ -178,6 +170,11 @@ void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_l
 void sram_click_1_read( uint32_t address, uint8_t* read_buff, uint32_t read_data_len);
 
 bool arr_equal(uint8_t* read_buffer, uint8_t* write_buffer);
+
+static inline void wait_tx_fifo_empty();
+
+static inline void wait_rx_fifo_rady();
+
 
 
 
@@ -276,6 +273,32 @@ int main(void)
 
     return 0;
 }
+
+
+
+static inline void wait_tx_fifo_empty(){
+    while ((spi_register->SR & SR_TFEMP_mask) == 0){}
+}
+
+static inline void wait_rx_fifo_rady(){
+    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+}
+
+static inline void tspi_set_frame_count(TSPI1_TypeDef *spi, uint8_t fc)
+{
+
+    /* 2. Read?modify?write: o?isti FC pa upi?i novu vrednost.
+          CSSEL, TMMD, MSTR? ostaju kakvi jesu.          */
+    uint32_t reg = spi->CR1 & ~TSPI_CR1_FC_Msk;   /* sa?uvaj sve osim FC   */
+    reg |= TSPI_CR1_FC(fc);                       /* novi FC               */
+    spi->CR1  = reg;                              /* upis nazad            */
+
+}
+
+static inline void flush_rx_fifo(){
+    while (spi_register->SR & SR_RLVL_mask) (void)spi_register->DR; 
+}
+
 
 
 void spi_init(){
@@ -394,11 +417,10 @@ void spi_init(){
     
 }
 
+
 static void spi_write_frame(uint32_t address, uint8_t data){
 
-    /* --- flush ?stare? podatke --- */
-    while (spi_register->SR & SR_RLVL_mask)
-        (void)spi_register->DR;            /* prazni RX FIFO */
+    flush_rx_fifo();
       
      // spi_register->DR = 0X02;  sve jedno dal je pre ili posle assertovanja CS i postavljanja TRXE = 1
       
@@ -406,31 +428,27 @@ static void spi_write_frame(uint32_t address, uint8_t data){
       spi_register->CR1 |= CR1_TRXE_mask;
       spi_register->DR = 0X02;
 
-      while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+      wait_tx_fifo_empty();
       
       spi_register->DR = address >> 16;
       
-       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+       wait_tx_fifo_empty();
 
 
       spi_register->DR = address >> 8;
 
-       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+       wait_tx_fifo_empty();
 
       spi_register->DR = address;
 
-       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+       wait_tx_fifo_empty();
 
       spi_register->DR = data;
 
-       while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
-
-      //TSB_PG->DATA |= BIT0;   ovde se JOS NIJE ZAVRSIO TRANSFER PSOLEDNJEB BAJTA
+       wait_tx_fifo_empty();
 
       
       spi_register->CR1 &= ~CR1_TRXE_mask;
-
-      //TSB_PG->DATA |= BIT0; NI OVDE
 
       while (spi_register->SR & SR_TSPISUE_mask) {}
 
@@ -444,9 +462,7 @@ static void spi_write_frame(uint32_t address, uint8_t data){
 
 uint8_t spi_read_frame(uint32_t address)
 {
-    /* --- flush ?stare? podatke --- */
-    while (spi_register->SR & SR_RLVL_mask)
-        (void)spi_register->DR;            /* prazni RX FIFO */
+    flush_rx_fifo();
 
     /* --- komanda + adresa + dummy --- */
               /* READ */
@@ -454,32 +470,32 @@ uint8_t spi_read_frame(uint32_t address)
     spi_register->CR1 |= CR1_TRXE_mask;
 
     spi_register->DR = 0x03; 
-    while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    wait_tx_fifo_empty();
+    wait_rx_fifo_rady();
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
       uint8_t data = spi_register->DR;  
 
     spi_register->DR = address >> 16;
-    while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    wait_tx_fifo_empty();
+    wait_rx_fifo_rady();
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
        data = spi_register->DR;
 
     spi_register->DR = address >> 8;
-    while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    wait_tx_fifo_empty();
+    wait_rx_fifo_rady();
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
        data = spi_register->DR;
 
     spi_register->DR = address;            /* A[7:0] */
-    while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    wait_tx_fifo_empty();
+    wait_rx_fifo_rady();
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
        data = spi_register->DR;
 
     spi_register->DR = 0x00;               /* dummy */
-     while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-    while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+    wait_tx_fifo_empty();
+    wait_rx_fifo_rady();
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
        data = spi_register->DR;
 
@@ -502,9 +518,7 @@ uint8_t spi_read_frame(uint32_t address)
 static void spi_master_write(uint8_t* arr, uint8_t data_length){
 
 
-       /* --- flush ?stare? podatke --- */
-    while (spi_register->SR & SR_RLVL_mask)
-        (void)spi_register->DR;            /* prazni RX FIFO */
+       flush_rx_fifo();
 
     tspi_set_frame_count(spi_register, data_length);   
 
@@ -514,7 +528,7 @@ static void spi_master_write(uint8_t* arr, uint8_t data_length){
 
       for(uint8_t i = 0; i < data_length; i++){
             spi_register->DR = arr[i];
-            while ((spi_register->SR & SR_TFEMP_mask) == 0) {}
+            wait_tx_fifo_empty();
       }  
 
       spi_register->CR1 &= ~CR1_TRXE_mask;
@@ -543,9 +557,8 @@ void sram_click_1_write(uint32_t address, uint8_t data_to_be_written){
 
 
 void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_len, uint8_t* read_data_buff, uint32_t read_data_len ){
-          /* --- flush ?stare? podatke --- */
-    while (spi_register->SR & SR_RLVL_mask)
-    (void)spi_register->DR;            /* prazni RX FIFO */
+    
+    flush_rx_fifo();
 
    tspi_set_frame_count(spi_register, write_data_len + read_data_len);
     
@@ -557,8 +570,8 @@ void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_l
 
     for(uint8_t i = 0; i < write_data_len; i++){
         spi_register->DR = write_data_buff[i];               
-        while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-        while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+        wait_tx_fifo_empty();
+        wait_rx_fifo_rady();
         while ((spi_register->SR & SR_RLVL_mask) == 0) {}
         data = spi_register->DR;
     }
@@ -566,8 +579,8 @@ void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_l
 
     for(int i = 0; i < read_data_len; i++){
         spi_register->DR = 0x00;               /* dummy */
-        while ((spi_register->SR & SR_TFEMP_mask) == 0){}
-        while ((spi_register->SR & SR_RXEND_mask) == 0) {}
+        wait_tx_fifo_empty();
+        wait_rx_fifo_rady();
         while ((spi_register->SR & SR_RLVL_mask) == 0) {}
         read_data_buff[i] = spi_register->DR;
     }
@@ -599,6 +612,7 @@ bool arr_equal(uint8_t* read_buffer, uint8_t* write_buffer){
     }
     return true;
 }
+
 
 
 

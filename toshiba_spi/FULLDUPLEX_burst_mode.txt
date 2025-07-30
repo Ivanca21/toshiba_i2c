@@ -175,6 +175,9 @@ static inline void wait_tx_fifo_empty();
 
 static inline void wait_rx_fifo_rady();
 
+static inline void flush_rx_fifo();
+
+
 
 
 

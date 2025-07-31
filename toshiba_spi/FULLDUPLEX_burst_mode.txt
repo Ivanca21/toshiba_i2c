@@ -227,14 +227,16 @@ int main(void)
 
     /*=========================================================== TEST2 ==========================================================*/
 
-    // uint8_t arr[10] = {0};
+    // uint8_t arr[30] = {0};
     // arr[0] = 0x02;
     // arr[1] = 0x00;
     // arr[2] = 0x00;
     // arr[3] = 0x01;
-    // arr[4] = 0xAB;
+    // for(uint8_t i =4; i < 30; i++){
+    //     arr[i] = i;
+    // }
 
-    // spi_master_write(arr, 5);
+    // spi_master_write(arr, 30);
 
     /*=========================================================== TEST3 ==========================================================*/
 
@@ -242,41 +244,41 @@ int main(void)
 
     /*=========================================================== TEST4 ==========================================================*/
 
-    for(uint8_t i = 0; i < 10; i++){
-        sram_click_1_write(i,i);
-    } 
-     uint8_t read_arr[10] = {0};
-    uint8_t local_array[4] = {0};
+    // for(uint8_t i = 0; i < 10; i++){
+    //     sram_click_1_write(i,i);
+    // } 
+    //  uint8_t read_arr[10] = {0};
+    // uint8_t local_array[4] = {0};
 
-    local_array[0] = 0x03;
-    local_array[1] = 0x000000 >> 16;
-    local_array[2] = 0x000000 >> 8;
-    local_array[3] = 0x000000;
+    // local_array[0] = 0x03;
+    // local_array[1] = 0x000000 >> 16;
+    // local_array[2] = 0x000000 >> 8;
+    // local_array[3] = 0x000000;
 
-    spi_master_write_then_read(local_array, 4, read_arr, 10 );
+    // spi_master_write_then_read(local_array, 4, read_arr, 10 );
 
     /*=========================================================== TEST5 ==========================================================*/
 
-    // uint8_t read_buff[10] = {0};
-    // uint8_t write_buff[10] = {0};
+    uint8_t read_buff[10] = {0};
+    uint8_t write_buff[10] = {0};
 
 
 
-    //  for(uint8_t i = 0; i < 10; i++){
-    //      sram_click_1_write(i,i);
-    //      write_buff[i] = i;
+     for(uint8_t i = 0; i < 10; i++){
+         sram_click_1_write(i,i);
+         write_buff[i] = i;
 
-    //  }
+     }
     
-    // sram_click_1_read(0x000000, read_buff, 10);
+    sram_click_1_read(0x000000, read_buff, 10);
 
-    // bool flag = 0;
+    bool flag = 0;
 
-    // flag = arr_equal(write_buff, read_buff);
+    flag = arr_equal(write_buff, read_buff);
 
-    // if(flag){
-    //     TSB_PK->DATA |= BIT1;
-    // }
+    if(flag){
+        TSB_PK->DATA |= BIT1;
+    }
 
 
     
@@ -424,7 +426,7 @@ void spi_init(){
 
 
 
-    tspi_set_TIDLE(spi_register, 2);
+    tspi_set_TIDLE(spi_register, 2  );
    
 
 

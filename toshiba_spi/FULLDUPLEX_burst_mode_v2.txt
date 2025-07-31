@@ -221,9 +221,9 @@ int main(void)
 
     /*=========================================================== TEST1 ==========================================================*/
 
-    //    spi_write_frame(0x00000001, 0xAB);
+       spi_write_frame(0x00000001, 0xAB);
 
-    //   uint8_t recieved_data = spi_read_frame(0x00000001);
+      uint8_t recieved_data = spi_read_frame(0x00000001);
 
     /*=========================================================== TEST2 ==========================================================*/
 
@@ -259,26 +259,26 @@ int main(void)
 
     /*=========================================================== TEST5 ==========================================================*/
 
-    uint8_t read_buff[10] = {0};
-    uint8_t write_buff[10] = {0};
+    // uint8_t read_buff[10] = {0};
+    // uint8_t write_buff[10] = {0};
 
 
 
-     for(uint8_t i = 0; i < 10; i++){
-         sram_click_1_write(i,i);
-         write_buff[i] = i;
+    //  for(uint8_t i = 0; i < 10; i++){
+    //      sram_click_1_write(i,i);
+    //      write_buff[i] = i;
 
-     }
+    //  }
     
-    sram_click_1_read(0x000000, read_buff, 10);
+    // sram_click_1_read(0x000000, read_buff, 10);
 
-    bool flag = 0;
+    // bool flag = 0;
 
-    flag = arr_equal(write_buff, read_buff);
+    // flag = arr_equal(write_buff, read_buff);
 
-    if(flag){
-        TSB_PK->DATA |= BIT1;
-    }
+    // if(flag){
+    //     TSB_PK->DATA |= BIT1;
+    // }
 
 
     
@@ -423,7 +423,7 @@ static void spi_write_frame(uint32_t address, uint8_t data){
             
       assert_CS();                                       
       spi_register->CR1 |= CR1_TRXE_mask;                /* enable communication -> this will set TSPISUE which disabled modification */
-      spi_register->DR = 0X02;                           /* write data to TX FIFO */
+      spi_register->DR = 0X02;                           /* TXRUN and INTTXWF are set after this line*/
         
       wait_tx_fifo_empty();                              /* wait til data is sent from TX FIFO to TX SHIFT REGISTER */
       
@@ -443,7 +443,7 @@ static void spi_write_frame(uint32_t address, uint8_t data){
       wait_tx_fifo_empty();
       
       if(rx_fifo_full()) flush_rx_fifo();
-      spi_register->DR = data;
+      spi_register->DR = data;                           /* RXEND will be set after this line */
 
       wait_tx_fifo_empty();
 
@@ -451,6 +451,8 @@ static void spi_write_frame(uint32_t address, uint8_t data){
       spi_register->CR1 &= ~CR1_TRXE_mask;               /* stop communication */
        
       while (spi_register->SR & SR_TSPISUE_mask) {}      /* wait untill modification is enabled */
+
+      spi_register->SR |= SR_RXEND_mask;
 
       deassert_CS();
 
@@ -492,7 +494,7 @@ uint8_t spi_read_frame(uint32_t address)
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
        data = spi_register->DR;
 
-    spi_register->DR = 0x00;               
+    spi_register->DR = 0x00;               //RXEND will be set after this line
 
     while ((spi_register->SR & SR_RLVL_mask) == 0) {}
        data = spi_register->DR;

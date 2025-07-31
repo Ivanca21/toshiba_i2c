@@ -107,10 +107,17 @@ PORT_G *PORT_G_register;
 #define FMTR0_CKPOL_mask           (0x01 << 14)
 #define FMTR0_CKPHA_mask           (0x01 << 15)
 
+/* CR2 */
+#define CR0_TIDLE_postition    22
+#define CR0_TIDLE_mask         (0x000003 << CR0_TIDLE_postition)
+
+
+
 #define TSPI_CR1_FC_Pos      0u
 #define TSPI_CR1_FC_Msk      (0xFFu << TSPI_CR1_FC_Pos)
 
-#define TSPI_CR1_FC(val)     (((uint32_t)(val) << TSPI_CR1_FC_Pos) & TSPI_CR1_FC_Msk)
+#define TSPI_CR1_FC(val)        (((uint32_t)(val) << TSPI_CR1_FC_Pos) & TSPI_CR1_FC_Msk)
+#define TSPI_CR2_TIDLE(val)     (((uint32_t)(val) << CR0_TIDLE_postition) & CR0_TIDLE_mask)
 
 #define MIKROBUS_1    false   
 #define MIKROBUS_2    false
@@ -126,6 +133,8 @@ uint8_t spi_read_frame(uint32_t address);
 
 
 static inline void tspi_set_frame_count(TSPI1_TypeDef *spi, uint8_t fc);
+
+static inline void tspi_set_TIDLE(TSPI1_TypeDef *spi, uint8_t tidle);
 
 
 static inline void assert_CS(){
@@ -176,6 +185,9 @@ static inline void wait_tx_fifo_empty();
 static inline void wait_rx_fifo_rady();
 
 static inline void flush_rx_fifo();
+
+bool rx_fifo_full();
+
 
 
 
@@ -230,41 +242,41 @@ int main(void)
 
     /*=========================================================== TEST4 ==========================================================*/
 
-    // for(uint8_t i = 0; i < 10; i++){
-    //     sram_click_1_write(i,i);
-    // } 
-    //  uint8_t read_arr[10] = {0};
-    // uint8_t local_array[4] = {0};
+    for(uint8_t i = 0; i < 10; i++){
+        sram_click_1_write(i,i);
+    } 
+     uint8_t read_arr[10] = {0};
+    uint8_t local_array[4] = {0};
 
-    // local_array[0] = 0x03;
-    // local_array[1] = 0x000000 >> 16;
-    // local_array[2] = 0x000000 >> 8;
-    // local_array[3] = 0x000000;
+    local_array[0] = 0x03;
+    local_array[1] = 0x000000 >> 16;
+    local_array[2] = 0x000000 >> 8;
+    local_array[3] = 0x000000;
 
-    // spi_master_write_then_read(local_array, 4, read_arr, 10 );
+    spi_master_write_then_read(local_array, 4, read_arr, 10 );
 
     /*=========================================================== TEST5 ==========================================================*/
 
-    uint8_t read_buff[10] = {0};
-    uint8_t write_buff[10] = {0};
+    // uint8_t read_buff[10] = {0};
+    // uint8_t write_buff[10] = {0};
 
 
 
-     for(uint8_t i = 0; i < 10; i++){
-         sram_click_1_write(i,i);
-         write_buff[i] = i;
+    //  for(uint8_t i = 0; i < 10; i++){
+    //      sram_click_1_write(i,i);
+    //      write_buff[i] = i;
 
-     }
+    //  }
     
-    sram_click_1_read(0x000000, read_buff, 10);
+    // sram_click_1_read(0x000000, read_buff, 10);
 
-    bool flag = 0;
+    // bool flag = 0;
 
-    flag = arr_equal(write_buff, read_buff);
+    // flag = arr_equal(write_buff, read_buff);
 
-    if(flag){
-        TSB_PK->DATA |= BIT1;
-    }
+    // if(flag){
+    //     TSB_PK->DATA |= BIT1;
+    // }
 
 
     
@@ -295,6 +307,17 @@ static inline void tspi_set_frame_count(TSPI1_TypeDef *spi, uint8_t fc)
     uint32_t reg = spi->CR1 & ~TSPI_CR1_FC_Msk;   /* sa?uvaj sve osim FC   */
     reg |= TSPI_CR1_FC(fc);                       /* novi FC               */
     spi->CR1  = reg;                              /* upis nazad            */
+
+}
+
+
+static inline void tspi_set_TIDLE(TSPI1_TypeDef *spi, uint8_t tidle_bits)
+{
+
+    
+    uint32_t reg = spi->CR2 & ~CR0_TIDLE_mask;  
+    reg |= TSPI_CR2_TIDLE(tidle_bits);               
+    spi->CR2  = reg;                             
 
 }
 
@@ -341,7 +364,7 @@ void spi_init(){
     }
 
 
-    //TSB_PG -> DATA &= ~BIT6;
+    //TSB_PG -> DATA &= ~BIT6;  //111111
     TSB_PG -> FR1 |= BIT6;
     TSB_PG -> CR |= BIT6;
     TSB_PG -> IE &= ~BIT6;
@@ -350,6 +373,7 @@ void spi_init(){
     TSB_PG -> FR1 |= BIT4;
     TSB_PG -> IE |= BIT4;
 
+    //TSB_PG->DATA &= ~BIT5;  //~~~~~~~~~~~
     TSB_PG -> CR |= BIT5;
     TSB_PG -> FR1 |= BIT5;
     TSB_PG -> IE &= ~BIT5;
@@ -396,6 +420,11 @@ void spi_init(){
 
     /* MASTER, SPI MODE, FUL DUPLEX, BURST MODE, TSPIxCS1,continuous transfer, trigger control not used  */
     spi_register -> CR1 = 0x00001D05;
+
+
+
+
+    tspi_set_TIDLE(spi_register, 2);
    
 
 
@@ -433,19 +462,22 @@ static void spi_write_frame(uint32_t address, uint8_t data){
 
       wait_tx_fifo_empty();
       
+      if(rx_fifo_full()) flush_rx_fifo();
       spi_register->DR = address >> 16;
       
        wait_tx_fifo_empty();
 
-
+      if(rx_fifo_full()) flush_rx_fifo();
       spi_register->DR = address >> 8;
 
        wait_tx_fifo_empty();
-
+      
+      if(rx_fifo_full()) flush_rx_fifo();
       spi_register->DR = address;
 
        wait_tx_fifo_empty();
-
+      
+      if(rx_fifo_full()) flush_rx_fifo();
       spi_register->DR = data;
 
        wait_tx_fifo_empty();
@@ -530,6 +562,7 @@ static void spi_master_write(uint8_t* arr, uint8_t data_length){
     spi_register->CR1 |= CR1_TRXE_mask;    
 
       for(uint8_t i = 0; i < data_length; i++){
+            if(rx_fifo_full()) flush_rx_fifo();
             spi_register->DR = arr[i];
             wait_tx_fifo_empty();
       }  
@@ -572,6 +605,7 @@ void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_l
     uint8_t data = 0;
 
     for(uint8_t i = 0; i < write_data_len; i++){
+        if(rx_fifo_full()) flush_rx_fifo();
         spi_register->DR = write_data_buff[i];               
         wait_tx_fifo_empty();
         wait_rx_fifo_rady();
@@ -615,6 +649,21 @@ bool arr_equal(uint8_t* read_buffer, uint8_t* write_buffer){
     }
     return true;
 }
+
+
+bool rx_fifo_full(){
+//    uint32_t FL_bits = (spi_register->FMTR0 & FMTRO_FL_position) >> FMTRO_FL_position;
+//    if(FL_bits <= 16){
+
+    if((spi_register->SR & SR_RFFLL_mask) != 0){
+        return true;
+    }else{
+        return false;
+    }
+    
+
+}
+
 
 
 

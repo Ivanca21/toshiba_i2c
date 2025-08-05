@@ -286,7 +286,7 @@ int main(void)
     
 
     /* Replace with your application code */
-    while (1)
+        while (1)
     {
     }
 
@@ -548,6 +548,8 @@ void sram_click_1_write(uint32_t address, uint8_t data_to_be_written){
 
 
 void spi_master_write_then_read( uint8_t* write_data_buff, uint32_t write_data_len, uint8_t* read_data_buff, uint32_t read_data_len ){
+
+    /* uvek ce se slati 8bitni podaci! */
     
     uint32_t tx_idx = 0;
     uint32_t rx_idx = 0;

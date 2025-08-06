@@ -1,0 +1,227 @@
+/**
+ * @file main.c
+ * @brief Main function for TOSHIBA_uart_polling application.
+ */
+
+/**
+ * Any initialization code needed for MCU to function properly.
+ * Do not remove this line or clock might not be set correctly.
+ */
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+
+
+#include "mcu.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+
+typedef struct
+{
+  volatile uint32_t SWRST;             /*!< UART Software Reset Register                 */
+  volatile uint32_t CR0;               /*!< UART Control Register 0                      */
+  volatile uint32_t CR1;               /*!< UART Control Register 1                      */
+  volatile uint32_t CLK;               /*!< UART Clock Control Register                  */
+  volatile uint32_t BRD;               /*!< UART Baud Rate Register                      */
+  volatile uint32_t TRANS;             /*!< UART Transfer Enable Register                */
+  volatile uint32_t DR;                /*!< UART Data Register                           */
+  volatile uint32_t SR;                /*!< UART Status Register                         */
+  volatile  uint32_t FIFOCLR;           /*!< UART FIFO Clear Register                     */
+  volatile uint32_t ERR;               /*!< UART Error Register                          */
+} UART_TypeDef;
+
+
+UART_TypeDef* uart_registers;
+
+#define PERIF_BASE             0x40000000UL
+#define UART_CH3_TYPE2         0x00CEC00UL
+
+
+/*=====================================================================BIT MASKS=====================================================================================*/
+
+#define BIT0                        (1U << 0)      
+#define BIT1                        (1U << 1)      
+#define BIT2                        (1U << 2)      
+#define BIT3                        (1U << 3)      
+#define BIT4                        (1U << 4)
+#define BIT0                        (1U << 0)      
+#define BIT1                        (1U << 1)       
+#define BIT2                        (1U << 2)      
+#define BIT5                        (1U << 5)     
+#define BIT6                        (1U << 6)    
+#define BIT7                        (1U << 7)  
+
+/*============== SWRST ==================*/
+#define SWRST_pos              (0)
+#define SWRST_mask             (0x00000003 << SWRST_pos)
+
+#define set_SWRST(val)         (((uint32_t)val << SWRST_pos) & SWRST_mask)
+
+static inline void set_SWRST_bits(UART_TypeDef* uart_registers, uint8_t bits){
+    uint32_t reg = uart_registers->SWRST & ~SWRST_mask;
+    reg |= set_SWRST(bits);
+    uart_registers->SWRST = reg;
+}
+
+/*============== CR0 ==================*/
+#define CR0_SM_pos            (0)
+#define CR0_SM_mask           (0x00000003 << CR0_SM_pos)
+
+#define set_SM(val)         (((uint32_t)val << CR0_SM_pos) & CR0_SM_mask)
+
+static inline void set_data_length(UART_TypeDef* uart_registers, uint8_t bits){
+    uint32_t reg = uart_registers->CR0 & ~CR0_SM_mask;
+    reg |= set_SM(bits);
+    uart_registers->CR0 = reg;
+}
+
+/*============== SR ==================*/
+#define SR_SUE_mask            (0x00000001 << 31)
+#define SR_TXRUN_mask          (0x00000001 << 15)
+#define SR_TXEND_mask          (0x00000001 << 14)
+#define SR_TLVL_mask           (0x0000000F << 8)
+#define SR_RXRUN_mask          (0x00000001 << 7)
+#define SR_RXEND_mask          (0x00000001 << 6)
+#define SR_RLVL_mask           (0x0000000F << 0)
+
+
+
+
+
+
+
+/*============== CR1 ==================*/
+#define CR1_INTTXWE_mask       (0x00000001 << 6)
+#define CR1_INTRXWE_mask       (0x00000001 << 4)
+
+/*============== BRD ==================*/
+#define BRD_KEN_mask           (0x00000001 << 23)
+
+#define BRK_pos                (16)
+#define BRK_mask               (0x0000003F << BRK_pos)
+
+#define set_BRK(val)         (((uint32_t)val << BRK_pos) & BRK_mask)
+
+static inline void set_BRK_bits(UART_TypeDef* uart_registers, uint8_t bits){
+    uint32_t reg = uart_registers->BRD & ~BRK_mask;
+    reg |= set_BRK(bits);
+    uart_registers->BRD = reg;
+}
+
+
+#define BRN_pos                (0)
+#define BRN_mask               (0x0000FFFF << BRN_pos)
+
+#define set_BRN(val)         (((uint32_t)val << BRN_pos) & BRN_mask)
+
+static inline void set_BRN_bits(UART_TypeDef* uart_registers, uint16_t bits){
+    uint32_t reg = uart_registers->BRD & ~BRN_mask;
+    reg |= set_BRN(bits);
+    uart_registers->BRD = reg;
+}
+
+/*============== TRANS ==================*/
+#define TRANS_BK_mask             (0x00000001 << 3)
+#define TRANS_TXE_mask            (0x00000001 << 1)
+#define TRANS_RXE_mask            (0x00000001 << 0)
+
+
+
+
+static void uart_init();
+
+static void send_data(uint8_t data);
+
+
+int main(void)
+{
+    /* Do not remove this line or clock might not be set correctly. */
+    #ifdef PREINIT_SUPPORTED
+    preinit();
+    #endif
+
+    
+
+    uart_registers = (UART_TypeDef *)(PERIF_BASE + UART_CH3_TYPE2);
+
+    
+    uart_init();
+
+    uint8_t data = 22;
+
+    send_data(data);
+
+
+    
+
+    /* Replace with your application code */
+    while (1)
+    {
+    }
+
+    return 0;
+}
+
+
+static void uart_init(){
+    /*clock i portovi:*/
+    TSB_CG_FSYSMENA_IPMENA05 = 1;  /* port F */
+    TSB_CG_FSYSMENA_IPMENA24 = 1;  /* uart ch3 */
+
+    /*
+    pf6 - TX
+    PF7 - RX
+    */
+
+    TSB_PF->CR |= BIT6;
+    TSB_PF->FR1 |= BIT6;
+    TSB_PF->IE &= ~BIT6;
+
+    TSB_PF->CR &= ~BIT7;
+    TSB_PF->FR1 |= BIT7;
+    TSB_PF->IE |= BIT7;
+    
+    /*
+    "The sequence of the write of "10" and the next write of "01" generates the software reset."
+     this initialises : TRANS, DR, SR, ERR and read_write poiners of tx/rx FIFOs.
+     when read, "00" is returned
+    */
+    set_SWRST_bits(uart_registers, 2);
+    set_SWRST_bits(uart_registers, 1);
+    
+    /*
+    "When <SUE> is "0", the UART does neither data transmission nor data reception. The registers can be updated"
+    */
+    uart_registers->SR &= ~ SR_SUE_mask;
+    
+    /*
+    uotput = UTxTXDA, no half clock, cts disabled, rts disabled, no data inversion
+    LSB first, stop bit length = 1 bit, parity disabled, data length = 8bit
+    */
+    set_data_length(uart_registers, 1);
+  
+    /*CR1 nista ne treba menjati*/
+
+    /* baud rate = 9600 */
+    uart_registers->BRD |= BRD_KEN_mask;
+    set_BRK_bits(uart_registers, 0x26);
+    set_BRN_bits(uart_registers, 0x104);
+   
+    /* transmission is done, transmission and reception disabled */
+    //uart_registers->TRANS |= TRANS_BK_mask;
+    uart_registers->TRANS &= ~ TRANS_TXE_mask;
+    uart_registers->TRANS &= ~TRANS_RXE_mask;
+}
+
+
+static void send_data(uint8_t data){
+
+    uart_registers->DR = data;
+    uart_registers->TRANS |= TRANS_RXE_mask;
+    uart_registers->TRANS |= TRANS_RXE_mask;
+
+    while((uart_registers->SR & SR_TXEND_mask) == 0) {}
+    uart_registers->SR |= SR_TXEND_mask;
+}

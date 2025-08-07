@@ -65,6 +65,8 @@ static inline void set_SWRST_bits(UART_TypeDef* uart_registers, uint8_t bits){
     uart_registers->SWRST = reg;
 }
 
+#define SWRSTF_mask            (0x00000001 << 7)
+
 /*============== CR0 ==================*/
 #define CR0_SM_pos            (0)
 #define CR0_SM_mask           (0x00000003 << CR0_SM_pos)
@@ -126,6 +128,12 @@ static inline void set_BRN_bits(UART_TypeDef* uart_registers, uint16_t bits){
 #define TRANS_BK_mask             (0x00000001 << 3)
 #define TRANS_TXE_mask            (0x00000001 << 1)
 #define TRANS_RXE_mask            (0x00000001 << 0)
+#define TRANS_TXTRG_mask          (0x00000001 << 2)
+
+
+/*============== FIFOCLR ==================*/
+#define FIFOCLR_TFCLR_mask        (0x00000001 << 1)
+#define FIFOCLR_RFCLR_mask        (0x00000001 << 0)
 
 
 
@@ -133,6 +141,9 @@ static inline void set_BRN_bits(UART_TypeDef* uart_registers, uint16_t bits){
 static void uart_init();
 
 static void send_data(uint8_t data);
+
+uint32_t fsys_mhz(void);
+
 
 
 int main(void)
@@ -149,11 +160,11 @@ int main(void)
     
     uart_init();
 
-    uint8_t data = 22;
+    uint8_t data = 9;
 
     send_data(data);
 
-
+     uint32_t test = fsys_mhz();
     
 
     /* Replace with your application code */
@@ -171,6 +182,7 @@ static void uart_init(){
     TSB_CG_FSYSMENA_IPMENA24 = 1;  /* uart ch3 */
 
     /*
+    MIKROBUS3 and MIKROBUS4:
     pf6 - TX
     PF7 - RX
     */
@@ -187,41 +199,89 @@ static void uart_init(){
     "The sequence of the write of "10" and the next write of "01" generates the software reset."
      this initialises : TRANS, DR, SR, ERR and read_write poiners of tx/rx FIFOs.
      when read, "00" is returned
+     thsi will set SR_SUO = 0 which enables seetings
     */
     set_SWRST_bits(uart_registers, 2);
     set_SWRST_bits(uart_registers, 1);
-    
-    /*
-    "When <SUE> is "0", the UART does neither data transmission nor data reception. The registers can be updated"
+
+    /*If the software reset is asserted, the next operation should be done after <SWRSTF> is checked to be "0". -> page 25
+     hardware will clear this flag itself when the initialization is done
     */
-    uart_registers->SR &= ~ SR_SUE_mask;
-    
+    while((uart_registers->SWRST & SWRSTF_mask) != 0) {}
+
+
+
     /*
-    uotput = UTxTXDA, no half clock, cts disabled, rts disabled, no data inversion
-    LSB first, stop bit length = 1 bit, parity disabled, data length = 8bit
-    */
+     data format: LSB first, no data inversion, 1 stop bit, parity disabled, data length = 8 bits 
+     output is TXDA pin 
+     */
     set_data_length(uart_registers, 1);
   
-    /*CR1 nista ne treba menjati*/
 
+    /*
+    CR1 nista ne treba menjati
+    INTRXWE i INTRXFE ne must not be both set to 1 at the same time -> page 14
+    */
+    
+    /* PRESCALER : divide ratio = 1/1 by default */
     /* baud rate = 9600 */
     uart_registers->BRD |= BRD_KEN_mask;
-    set_BRK_bits(uart_registers, 0x26);
-    set_BRN_bits(uart_registers, 0x104);
-   
-    /* transmission is done, transmission and reception disabled */
-    //uart_registers->TRANS |= TRANS_BK_mask;
-    uart_registers->TRANS &= ~ TRANS_TXE_mask;
-    uart_registers->TRANS &= ~TRANS_RXE_mask;
+    set_BRK_bits(uart_registers, 0x15);
+    set_BRN_bits(uart_registers, 0x441);
+    
+    /* this initializes write/read pointers of rx-tx FIFOs */
+    uart_registers->FIFOCLR |= FIFOCLR_TFCLR_mask | FIFOCLR_RFCLR_mask;
+
+    /*==== SR =====*/
+    /* when one fram is sent/recieved TXEND/RXEND is always set to 1, but if INTRXWE/INTTXWE is set to 1 then int will be generated */
+
+     /* 
+     when data transmition is enabled,data in FIFO is moved to SHIFT reg(then goes to TXDA/B) -> page 14
+     once enabled,if data exists in DR,transmition starts,otherwise it starts once its written to DR -> page 19
+     normal transmition => TXTRG should be set to 0.
+     transmition coninues until all data in the trensmit FIFO are transmitted
+     when TLVL increments => SR_TXRUN is set to 1,when transmit is done TXRUN clears which sets TXEND.
+     when TXE is cleared during transmittion, it stop after transmitting current frame -> DATA in FIFO is maintained.
+     re-enabling transmission -> set TXE = 1 after checking TXRUN = 0
+     */
+     uart_registers->TRANS &= ~TRANS_TXTRG_mask;
+     uart_registers->TRANS |=  TRANS_TXE_mask;   /* after setting TXE/RXE => SR_SUE is set to 1 -> setting disabled*/
 }
 
 
 static void send_data(uint8_t data){
 
+    /* clear TXEND */
+    //uart_registers->SR |= SR_TXEND_mask;
+    
     uart_registers->DR = data;
-    uart_registers->TRANS |= TRANS_RXE_mask;
-    uart_registers->TRANS |= TRANS_RXE_mask;
 
-    while((uart_registers->SR & SR_TXEND_mask) == 0) {}
+    while(!(uart_registers->SR & SR_TXEND_mask)) {}
     uart_registers->SR |= SR_TXEND_mask;
+}
+
+
+
+static uint8_t read_data(){
+       /* reg DR should not be read when the recieve FIFO is empty -> page 14 */
+       /* data bits AND A STOP BIT are recieved -> page 15 */
+       /* 
+       TRANS_RXE = 1 and RXD = "low" => start bit detected 
+       if RXE is set to 0 during reception, reception completes and operation stops -> page 14
+       */
+       /* when reception starts -> SR_RXRUN = 1, when it ends SR_RXRXRUN = 0 which sets RXEND */
+}
+
+
+uint32_t fsys_mhz(void)
+{
+    /* CGSYSCR[HCLKSEL] 0:fsys/1, 1:fsys/2 ...  */
+    /* CGPLL0SEL[PLL0SEL] 1=PLL koristi fsys */
+    /* CGPLL0SEL[PLL0ON]  1=PLL uključen      */
+    /* CGPLL0SEL[PLL0SET] daje množilac       */
+    /* Ovde samo grubo: ako je PLL0SEL=1 pretpostavljamo 80 MHz */
+    if (TSB_CG->PLL0SEL & (1<<2))   /* PLL0SEL */
+        return 80;
+    else
+        return 40;              /* direktan kristal sa deliocem 1/1 */
 }

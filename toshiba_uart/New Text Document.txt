@@ -142,6 +142,15 @@ static void clock_init_fsysm_80mhz(void)
     TSB_CG->SYSCR = syscr;
 }
 
+static void send_arr(uint8_t* arr, uint8_t data_num){
+       for(uint8_t i = 0; i < data_num; i++){
+        send_data(arr[i]);
+       }
+       
+}
+
+
+
 int main(void)
 {
 #ifdef PREINIT_SUPPORTED
@@ -159,9 +168,28 @@ int main(void)
     volatile uint32_t dbg_BRD     = uart_registers->BRD; /* o?ekuj KEN=1, K=0x0B, N=0x0208 */
 
     /* test: vidljiv karakter (0x55 = 'U') */
-    send_data(0x55);
+    //send_data(0x55);
+    //send_data('A');
 
-    while (1) { }
+    uint8_t string[] = {"Milan has drip"};
+    uint8_t size = sizeof(string)/sizeof(string[0]);
+
+
+    send_arr(string, size - 1);  /* string[size] = '\0' */
+    
+    while (1) {
+
+        
+
+       while((uart_registers->SR & SR_RLVL_mask) != 0){
+            uint8_t recieved_data = uart_registers->DR;
+            send_data(recieved_data);
+            uart_registers->SR |= SR_RXEND_mask;
+       }
+
+        
+
+     }
     return 0;
 }
 
@@ -211,11 +239,12 @@ static void uart_init(void)
 
 static void send_data(uint8_t data)
 {
-    /* o?isti TXEND (W1C), pa ?alji */
-    uart_registers->SR |= SR_TXEND_mask;
 
     uart_registers->DR = data;
+    
+     while ((uart_registers->SR & SR_TXEND_mask) == 0) { }
+ 
 
-    while (!(uart_registers->SR & SR_TXEND_mask)) { }
-    /* opcionalno: uart_registers->SR |= SR_TXEND_mask; */
+    uart_registers->SR |= SR_TXEND_mask; 
+
 }

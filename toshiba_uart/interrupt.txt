@@ -1,0 +1,276 @@
+/**
+ * @file main.c
+ * @brief Main function for TOSHIBA_uart_polling application.
+ */
+
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+#include "mcu.h"
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef struct
+{
+  volatile uint32_t SWRST;     /* UART Software Reset Register                 */
+  volatile uint32_t CR0;       /* UART Control Register 0                      */
+  volatile uint32_t CR1;       /* UART Control Register 1                      */
+  volatile uint32_t CLK;       /* UART Clock Control Register                  */
+  volatile uint32_t BRD;       /* UART Baud Rate Register                      */
+  volatile uint32_t TRANS;     /* UART Transfer Enable Register                */
+  volatile uint32_t DR;        /* UART Data Register                           */
+  volatile uint32_t SR;        /* UART Status Register                         */
+  volatile uint32_t FIFOCLR;   /* UART FIFO Clear Register                     */
+  volatile uint32_t ERR;       /* UART Error Register                          */
+} UART_TypeDef;
+
+UART_TypeDef* uart_registers;
+
+#define PERIF_BASE             0x40000000UL
+#define UART_CH3_TYPE2         0x00CEC00UL   /* UT3 TYPE2 base */
+
+/* ============================== BIT MASKS ============================== */
+#define BIT0 (1U << 0)
+#define BIT1 (1U << 1)
+#define BIT2 (1U << 2)
+#define BIT3 (1U << 3)
+#define BIT4 (1U << 4)
+#define BIT5 (1U << 5)
+#define BIT6 (1U << 6)
+#define BIT7 (1U << 7)
+
+/*============== SWRST ==================*/
+#define SWRST_pos              (0)
+#define SWRST_mask             (0x00000003U << SWRST_pos)
+#define set_SWRST(val)         (((uint32_t)(val) << SWRST_pos) & SWRST_mask)
+
+static inline void set_SWRST_bits(UART_TypeDef* u, uint8_t bits){
+    uint32_t reg = u->SWRST & ~SWRST_mask;
+    reg |= set_SWRST(bits);
+    u->SWRST = reg;
+}
+
+#define SWRSTF_mask            (0x00000001U << 7)
+
+/*============== CR0 ==================*/
+#define CR0_SM_pos            0
+#define CR0_SM_mask           (0x3U << CR0_SM_pos)
+#define set_SM(val)           (((uint32_t)(val) << CR0_SM_pos) & CR0_SM_mask)
+
+static inline void set_data_length(UART_TypeDef* u, uint8_t bits){
+    uint32_t reg = u->CR0 & ~CR0_SM_mask;
+    reg |= set_SM(bits);
+    u->CR0 = reg;
+}
+
+/*============== SR ==================*/
+#define SR_SUE_mask            (0x00000001U << 31)
+#define SR_TXRUN_mask          (0x00000001U << 15)
+#define SR_TXEND_mask          (0x00000001U << 14)
+#define SR_TLVL_mask           (0x0000000FU << 8)
+#define SR_RXRUN_mask          (0x00000001U << 7)
+#define SR_RXEND_mask          (0x00000001U << 6)
+#define SR_RLVL_mask           (0x0000000FU << 0)
+#define SR_TXFF_mask           (0x00000001 << 13)
+#define SR_RXFF_mask           (0x00000001 << 5)
+
+
+/*============== CR1 ==================*/
+#define CR1_INTTXWE_mask       (0x00000001U << 6)
+#define CR1_INTRXWE_mask       (0x00000001U << 4)
+
+/*============== BRD ==================*/
+#define BRD_KEN_mask           (0x00000001U << 23)
+#define BRK_pos                16
+#define BRK_mask               (0x3FU << BRK_pos)
+#define set_BRK(val)           (((uint32_t)(val) << BRK_pos) & BRK_mask)
+
+static inline void set_BRK_bits(UART_TypeDef* u, uint8_t bits){
+    uint32_t reg = u->BRD & ~BRK_mask;
+    reg |= set_BRK(bits);
+    u->BRD = reg;
+}
+
+#define BRN_pos                0
+#define BRN_mask               (0x0000FFFFU << BRN_pos)
+#define set_BRN(val)           (((uint32_t)(val) << BRN_pos) & BRN_mask)
+
+static inline void set_BRN_bits(UART_TypeDef* u, uint16_t bits){
+    uint32_t reg = u->BRD & ~BRN_mask;
+    reg |= set_BRN(bits);
+    u->BRD = reg;
+}
+/*============== CR1 ==================*/
+#define CR1_INTTXFE_mask          (0x00000001 << 7)
+#define CR1_INTRXFE_mask          (0x00000001 << 5)
+
+/*============== TRANS ==================*/
+#define TRANS_BK_mask             (0x00000001U << 3)
+#define TRANS_TXTRG_mask          (0x00000001U << 2)
+#define TRANS_TXE_mask            (0x00000001U << 1)
+#define TRANS_RXE_mask            (0x00000001U << 0)
+
+/*============== FIFOCLR ==================*/
+#define FIFOCLR_TFCLR_mask        (0x00000001U << 1)
+#define FIFOCLR_RFCLR_mask        (0x00000001U << 0)
+
+/* ============================== FWD DECLS ============================== */
+static void uart_init(void);
+static void send_data(uint8_t data);
+static inline void delay_loop(volatile uint32_t n){ while(n--) __asm volatile("nop"); }
+
+/* ============================== CLOCK: fsysm=80 MHz ============================== */
+/* PLL=160 MHz iz ~10 MHz, pa fsysm = fsysh/2 = 80 MHz */
+static void clock_init_fsysm_80mhz(void)
+{
+    /* otklju?aj CG registre */
+    TSB_CG->PROTECT = 0xC1;
+
+    /* PLL0SET polje je [31:8] ? maska 24 bita + <<8 */
+    uint32_t pll = TSB_CG->PLL0SEL;
+    pll &= ~0xFFFFFF00u;              /* o?isti PLL0SET */
+    pll |=  (0x2E9020u << 8);         /* 160 MHz iz 10 MHz (×32, ÷2) */
+    TSB_CG->PLL0SEL = pll;
+
+    /* PLL ON ? kratko ?ekanje ? selektuj PLL */
+    TSB_CG->PLL0SEL |= (1u << 0);     /* PLL0ON=1 */
+    delay_loop(200000);               /* ~par stotina µs @ ~10 MHz */
+    TSB_CG->PLL0SEL |= (1u << 1);     /* PLL0SEL=1 (koristi PLL) */
+    while ((TSB_CG->PLL0SEL & (1u << 2)) == 0) { } /* PLL0ST? */
+
+    /* fsysm = fsysh/2 = 80 MHz (GEAR=000 ? fsysh=160; MCKSEL=01 ? /2; PRCK=0000) */
+    uint32_t syscr = TSB_CG->SYSCR;
+    syscr &= ~((0xFu << 8) | (3u << 6) | (7u << 0));   /* PRCK | MCKSEL | GEAR */
+    syscr |=  (0u   << 8);   /* PRCK=0000 */
+    syscr |=  (1u   << 6);   /* MCKSEL=01 ? fsysm=80 MHz */
+    syscr |=  (0u   << 0);   /* GEAR=000  ? fsysh=160 MHz */
+    TSB_CG->SYSCR = syscr;
+}
+
+
+static void send_arr(uint8_t* arr, uint8_t data_num){
+       for(uint8_t i = 0; i < data_num; i++){
+        send_data(arr[i]);
+       }
+       
+}
+
+/* UART ch3 reception interrupt */
+void INTSC3RX_Handler(){
+
+}
+
+/* UART ch3 transmit interrupt */
+void INTSC3TX_Handler(){
+       if((uart_registers->SR & SR_TXFF_mask) != 0){    /* provera da li je zbog ovoga usao u ISR */
+
+   
+           uart_registers->SR |= SR_TXEND_mask;
+           uart_registers->SR |= SR_TXFF_mask;
+       }
+}
+
+
+
+int main(void)
+{
+#ifdef PREINIT_SUPPORTED
+    preinit();
+#endif
+
+    uart_registers = (UART_TypeDef *)(PERIF_BASE + UART_CH3_TYPE2);
+
+    uart_init();
+
+    /* debug snapshot ? pogledaj u debuggeru */
+    volatile uint32_t dbg_PLL0SEL = TSB_CG->PLL0SEL;   /* o?ekuj PLL0ST=1 (bit2) */
+    volatile uint32_t dbg_SYSCR   = TSB_CG->SYSCR;     /* o?ekuj MCKSEL=01, PRCK=0000 */
+    volatile uint32_t dbg_UARTCLK = uart_registers->CLK; /* o?ekuj PRSEL=0000 */
+    volatile uint32_t dbg_BRD     = uart_registers->BRD; /* o?ekuj KEN=1, K=0x0B, N=0x0208 */
+
+    /* test: vidljiv karakter (0x55 = 'U') */
+    //send_data(0x55);
+    //send_data('A');
+
+     uint8_t string[] = {"Milan has drip"};
+     uint8_t size = sizeof(string)/sizeof(string[0]);
+
+
+     send_arr(string, size - 1);  /* string[size] = '\0' */
+    
+     while (1) {
+
+        
+
+    //    while((uart_registers->SR & SR_RLVL_mask) != 0){
+    //         uint8_t recieved_data = uart_registers->DR;
+    //         send_data(recieved_data);
+    //         uart_registers->SR |= SR_RXEND_mask; 
+    //    }
+
+        
+
+      }
+    return 0;
+}
+
+static void uart_init(void)
+{
+    /* enable clockova za Port F i UART3 */
+    TSB_CG_FSYSMENA_IPMENA05 = 1;  /* port F */
+    TSB_CG_FSYSMENA_IPMENA24 = 1;  /* UART ch3 */
+
+    clock_init_fsysm_80mhz();      /* fsysm = 80 MHz */
+
+    /* PF6 (TX), PF7 (RX) na mikroBUS3/4 */
+    TSB_PF->CR  |= BIT6;
+    TSB_PF->FR1 |= BIT6;
+    TSB_PF->IE  &= ~BIT6;
+
+    TSB_PF->CR  &= ~BIT7;
+    TSB_PF->FR1 |= BIT7;
+    TSB_PF->IE  |=  BIT7;
+    TSB_PF->PUP |=  BIT7;          /* pull-up na RX (idle '1') */
+
+    /* SW reset 10 -> 01, pa ?ekaj SWRSTF=0 */
+    set_SWRST_bits(uart_registers, 2);
+    set_SWRST_bits(uart_registers, 1);
+    while ((uart_registers->SWRST & SWRSTF_mask) != 0) {}
+
+    /* 8-bit, 1 stop, bez pariteta (SM=01) */
+    set_data_length(uart_registers, 1);
+
+    /* UART preskaler PRSEL=/1 (RMW), pa BRD @ 80 MHz: 9600 ? N=0x0208, K=0x0B */
+    uint32_t clk = uart_registers->CLK;
+    clk &= ~(0xFu << 4);                /* PRSEL clear */
+    clk |=  (0u   << 4);                /* PRSEL = 0000 (/1) */
+    uart_registers->CLK = clk;
+
+    uart_registers->BRD |= BRD_KEN_mask;
+    set_BRN_bits(uart_registers, 0x0208);
+    set_BRK_bits(uart_registers, 0x0B);
+
+    /* enable transmir and recieve interrupts */
+    uart_registers->CR1 |= CR1_INTTXFE_mask | CR1_INTRXFE_mask;
+
+    /* po resetu => TIL = 0; RIL = 1 */
+
+    /* FIFO clear (TX i RX) */
+    uart_registers->FIFOCLR |= FIFOCLR_TFCLR_mask | FIFOCLR_RFCLR_mask;
+
+    /* normal transmit (TXTRG=0), enable TX i RX */
+    uart_registers->TRANS &= ~TRANS_TXTRG_mask;
+    uart_registers->TRANS |=  TRANS_TXE_mask | TRANS_RXE_mask;
+
+    NVIC->ICPR[2] = (1u << (70 - 64));
+    NVIC->ISER[2] = (1u << (70 - 64));
+    NVIC->IP[70]  = 0x80;   // prioritet srednji
+    __enable_irq();
+}
+
+static void send_data(uint8_t data)
+{
+    uart_registers->DR = data;
+
+}

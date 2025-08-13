@@ -148,28 +148,82 @@ static void clock_init_fsysm_80mhz(void)
     TSB_CG->SYSCR = syscr;
 }
 
+volatile bool ready_to_send = false;
 
 static void send_arr(uint8_t* arr, uint8_t data_num){
        for(uint8_t i = 0; i < data_num; i++){
+        ready_to_send = false;
         send_data(arr[i]);
+        while(ready_to_send == false) {};
        }
        
 }
 
-/* UART ch3 reception interrupt */
-void INTSC3RX_Handler(){
-
+static inline uint32_t tlvl(void){
+    return ((uart_registers -> SR & SR_TLVL_mask)) >> 8;
 }
+
+
+static inline uint32_t rlvl(void){
+    return (uart_registers->SR & SR_RLVL_mask) >> 0;   // 0..8
+}
+
+
+volatile uint8_t x = 0;
+
+
+static volatile const uint8_t* tx_buf;
+static volatile uint16_t tx_len;
+static volatile uint16_t tx_pos;
+
+static volatile uint8_t* rx_buff;
+static volatile uint16_t rx_pos;
+
+
 
 /* UART ch3 transmit interrupt */
-void INTSC3TX_Handler(){
+void INTSC3TX_Handler(void){
        if((uart_registers->SR & SR_TXFF_mask) != 0){    /* provera da li je zbog ovoga usao u ISR */
+            
+        /* VERSION 1 */
+        //    uart_registers->SR |= SR_TXFF_mask; 
+        //   //uart_registers->SR |= SR_TXEND_mask;  ne treba
 
-   
-           uart_registers->SR |= SR_TXEND_mask;
-           uart_registers->SR |= SR_TXFF_mask;
+        //    ready_to_send = true;
+
+        /* VERSION 2 */
+        // uart_registers->SR |= SR_TXFF_mask;
+
+        // while( (tlvl() < 8) && (tx_pos < tx_len) ){
+        //     uart_registers->DR = tx_buf[tx_pos++];
+        // }
+       
+        /* VERSION 3 */
+        uart_registers->SR |= SR_TXFF_mask;
+
+        
        }
 }
+
+
+/* UART ch3 reception interrupt */
+void INTSC3RX_Handler(void){
+      if((uart_registers->SR & SR_RXFF_mask) != 0){ 
+               uart_registers->SR |= SR_RXFF_mask;
+
+               while( (rlvl()) > 0 ){
+                uint8_t recieved_char = uart_registers->DR;
+   
+                while( (tlvl()) >= 8 ) {};
+
+                uart_registers->DR = recieved_char;
+               }
+
+               
+      }
+}
+
+
 
 
 
@@ -189,27 +243,54 @@ int main(void)
     volatile uint32_t dbg_UARTCLK = uart_registers->CLK; /* o?ekuj PRSEL=0000 */
     volatile uint32_t dbg_BRD     = uart_registers->BRD; /* o?ekuj KEN=1, K=0x0B, N=0x0208 */
 
-    /* test: vidljiv karakter (0x55 = 'U') */
-    //send_data(0x55);
-    //send_data('A');
+    uint8_t test = 0;
 
-     uint8_t string[] = {"Milan has drip"};
-     uint8_t size = sizeof(string)/sizeof(string[0]);
+/*============================================= TEST 1 ==========================================================================*/
+//     /* test: vidljiv karakter (0x55 = 'U') */
+//     //send_data(0x55);
+//     //send_data('A');
 
 
-     send_arr(string, size - 1);  /* string[size] = '\0' */
+//      uint8_t string[] = {"milan has drip"};
+//      uint8_t size = sizeof(string)/sizeof(string[0]);
+
+
+//      //send_arr(string, size - 1);  /* string[size] = '\0' */
+
+//     //  for(uint16_t i = 0; i < size - 1; i++){    OVA DODELA NE MOZE
+//     //          tx_buf[i] = string[i];
+//     //  }
+
+//    tx_buf = string;
+//    tx_len = size - 1;
+//     tx_pos = 0;
     
-     while (1) {
 
-        
 
-    //    while((uart_registers->SR & SR_RLVL_mask) != 0){
-    //         uint8_t recieved_data = uart_registers->DR;
-    //         send_data(recieved_data);
-    //         uart_registers->SR |= SR_RXEND_mask; 
-    //    }
+//      while( (tlvl() < 8) && (tx_pos < tx_len) ){
+//         uart_registers->DR = tx_buf[tx_pos++];
+//      }
 
-        
+//     /* mora posale inace dobijam "milan hasdrip" , 
+//      ovo je jer se desi ako se isr okine pre nego sto se popuni buffer u mainu pa se preskoci neki karakter
+//      */
+//     uart_registers->CR1 |= CR1_INTTXFE_mask;  
+
+/*=============================================================== TEST 2 ====================================================*/
+
+
+     
+
+    
+    while (1) {
+
+        if(x == 1){
+            test = 1;
+        }
+
+        if(rx_buff[0] == 0) {
+            
+        }      
 
       }
     return 0;
@@ -252,7 +333,8 @@ static void uart_init(void)
     set_BRK_bits(uart_registers, 0x0B);
 
     /* enable transmir and recieve interrupts */
-    uart_registers->CR1 |= CR1_INTTXFE_mask | CR1_INTRXFE_mask;
+    uart_registers->CR1 |= CR1_INTTXFE_mask;
+    uart_registers->CR1 |= CR1_INTRXFE_mask;
 
     /* po resetu => TIL = 0; RIL = 1 */
 
@@ -263,9 +345,11 @@ static void uart_init(void)
     uart_registers->TRANS &= ~TRANS_TXTRG_mask;
     uart_registers->TRANS |=  TRANS_TXE_mask | TRANS_RXE_mask;
 
-    NVIC->ICPR[2] = (1u << (70 - 64));
-    NVIC->ISER[2] = (1u << (70 - 64));
-    NVIC->IP[70]  = 0x80;   // prioritet srednji
+    NVIC->ICPR[2] = (1u << (69 - 64)) | (1u << (70 - 64)); /* clear pending */
+    NVIC->ISER[2] = (1u << (69 - 64)) | (1u << (70 - 64)); /* enable */
+    NVIC->IP[69]  = 0x80;
+    NVIC->IP[70]  = 0x80;
+
     __enable_irq();
 }
 
